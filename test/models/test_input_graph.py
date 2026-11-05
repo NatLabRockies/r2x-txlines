@@ -19,7 +19,6 @@ from transmissionlines.models.configurations import CircuitConfiguration, TowerC
 from transmissionlines.models.geometry import GroundWirePosition, PhasePosition, TowerGeometry
 from transmissionlines.models.routing import ElectricalTower, LineSpan, RouteGeometry, StartEnd
 from transmissionlines.system import TransmissionLineSystem
-from transmissionlines.units import Quantity
 
 
 def _configuration() -> TowerConfiguration:
@@ -107,7 +106,7 @@ def test_bus_and_tower_reject_out_of_range_wgs84_locations(
 
 
 def test_wgs84_boundaries_accept_radian_coordinates() -> None:
-    location = GeographicPoint(latitude_deg=Quantity(pi / 2, "radian"), longitude_deg=Quantity(-pi, "radian"))
+    location = GeographicPoint(latitude_deg={"value": pi / 2, "unit": "radian"}, longitude_deg={"value": -pi, "unit": "radian"})
     assert Bus(name="boundary", location=location).location is location
     assert ElectricalTower(
         name="boundary-tower", tower_id="T1", sequence=0, location=location,

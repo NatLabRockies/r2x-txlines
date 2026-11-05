@@ -2,7 +2,6 @@ import pytest
 
 from transmissionlines.bundle import derived_bundle_values
 from transmissionlines.models.cables import BareConductorEquipment, BundleSpec, ConductorSpec
-from transmissionlines.units import Quantity
 
 
 def conductor() -> BareConductorEquipment:
@@ -52,7 +51,7 @@ def test_capacitance_radius_is_optional_parity_extension() -> None:
 
 def test_mechanical_quantities_round_trip_and_reject_wrong_dimensions() -> None:
     equipment = BareConductorEquipment(
-        weight_lb_kft=Quantity(0.5, "pound_force / foot"),
+        weight_lb_kft={"value": 0.5, "unit": "pound_force / foot"},
         rated_strength_lb=2000,
         total_area_in2=0.75,
     )
@@ -65,4 +64,4 @@ def test_mechanical_quantities_round_trip_and_reject_wrong_dimensions() -> None:
     assert restored.total_area_in2 is not None
     assert restored.total_area_in2 == pytest.approx(0.75)
     with pytest.raises(ValueError):
-        BareConductorEquipment(weight_lb_kft=Quantity(1, "inch"))
+        BareConductorEquipment(weight_lb_kft={"value": 1, "unit": "inch"})

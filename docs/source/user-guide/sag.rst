@@ -21,8 +21,8 @@ the catalog, and the same options apply to all selected circuits in a call.
 Use separate calls when conductors require different effective properties.
 Temperatures are ``reference_temperature_c`` and ``operating_temperature_c``;
 the span grid is ``span_start_ft``, ``span_stop_ft``, ``span_step_ft``, and the
-signed ``elevation_difference_ft``. Each also accepts a pint quantity in other
-units (for example, kelvin or metres), converted when the options are built.
+signed ``elevation_difference_ft``. Each also accepts a ``{"value": ..., "unit": ...}``
+mapping in other units (for example, kelvin or metres), converted when the options are built.
 ``additional_permanent_strain`` is a dimensionless float. The ``SagOptions``
 field names are the same as the ``sag_options`` keys of ``build.calculations``.
 
