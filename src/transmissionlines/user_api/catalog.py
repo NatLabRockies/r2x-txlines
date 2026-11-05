@@ -151,7 +151,8 @@ class BrowsingCatalog:
     def positions(self, table: str, geometry_id: str) -> list[dict[str, Any]]:
         """Read all positions joined to an explicitly selected geometry ID."""
         frame = self.repository.table(table)
-        return frame[frame["geometry_id"] == geometry_id].to_dict("records")
+        rows = frame[frame["geometry_id"] == geometry_id].to_dict("records")
+        return [{key: None if pd.isna(value) else value for key, value in row.items()} for row in rows]
 
     def tower_circuits(self, geometry_id: str) -> tuple[str, ...]:
         """Return actual circuit IDs after validating geometry phase positions."""
