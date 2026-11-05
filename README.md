@@ -1,8 +1,8 @@
 # TransmissionLines
 
-[![Tests](https://github.com/SebastianManriqueM/transmissionlines/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/SebastianManriqueM/transmissionlines/actions/workflows/tests.yml)
-[![Docs build](https://github.com/SebastianManriqueM/transmissionlines/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/SebastianManriqueM/transmissionlines/actions/workflows/docs.yml)
-[![Documentation](https://img.shields.io/badge/docs-Sphinx-466A7C?logo=sphinx)](https://sebastianmanriquem.github.io/transmissionlines/)
+[![Tests](https://github.com/NatLabRockies/r2x-txlines/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/NatLabRockies/r2x-txlines/actions/workflows/tests.yml)
+[![Docs build](https://github.com/NatLabRockies/r2x-txlines/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/NatLabRockies/r2x-txlines/actions/workflows/docs.yml)
+[![Documentation](https://img.shields.io/badge/docs-Sphinx-466A7C?logo=sphinx)](https://natlabrockies.github.io/r2x-txlines/)
 
 TransmissionLines is a Python package for typed transmission-line models,
 electrical parameter calculations, and positive-sequence St. Clair loadability
@@ -11,13 +11,13 @@ from a repository checkout rather than PyPI.
 
 ## Documentation
 
-Read the [documentation overview](https://sebastianmanriquem.github.io/transmissionlines/),
-start with the [quick start](https://sebastianmanriquem.github.io/transmissionlines/quickstart.html),
-or see the [repository layout and responsibilities](https://sebastianmanriquem.github.io/transmissionlines/developer-guide/repository-layout.html).
-Browse the [catalog inventory](https://sebastianmanriquem.github.io/transmissionlines/catalog/index.html)
-or follow the [catalog-backed line and calculation recipes](https://sebastianmanriquem.github.io/transmissionlines/how-to/index.html).
+Read the [documentation overview](https://natlabrockies.github.io/r2x-txlines/),
+start with the [quick start](https://natlabrockies.github.io/r2x-txlines/quickstart.html),
+or see the [repository layout and responsibilities](https://natlabrockies.github.io/r2x-txlines/developer-guide/repository-layout.html).
+Browse the [catalog inventory](https://natlabrockies.github.io/r2x-txlines/catalog/index.html)
+or follow the [catalog-backed line and calculation recipes](https://natlabrockies.github.io/r2x-txlines/how-to/index.html).
 The docs workflow builds the Sphinx site and deploys it to
-[GitHub Pages](https://sebastianmanriquem.github.io/transmissionlines/). Click the
+[GitHub Pages](https://natlabrockies.github.io/r2x-txlines/). Click the
 Docs build badge above to see workflow runs.
 
 ## Features
