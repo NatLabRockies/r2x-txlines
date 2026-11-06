@@ -11,7 +11,6 @@ from transmissionlines.models.electrical import ElectricalParameters
 from transmissionlines.models.geometry import GroundWirePosition, PhasePosition, TowerGeometry
 from transmissionlines.models.st_clair import StClairOptions
 from test.integration.test_calculation_input_graph import _routed_line
-from transmissionlines.units import Quantity
 
 
 def _conductor() -> BareConductorEquipment:
@@ -133,9 +132,9 @@ def test_high_level_calculation_normalizes_compatible_technical_units() -> None:
     original = _line()
     alternate = calculate_line_electrical_parameters(type(original)(
         name=original.name, configuration=original.configuration,
-        nominal_voltage_kv=Quantity(230000, "volt"),
-        nominal_frequency_hz=Quantity(0.06, "kilohertz"),
-        earth_resistivity_ohm_m=Quantity(10000, "ohm * centimeter"),
+        nominal_voltage_kv={"value": 230000, "unit": "volt"},
+        nominal_frequency_hz={"value": 0.06, "unit": "kilohertz"},
+        earth_resistivity_ohm_m={"value": 10000, "unit": "ohm * centimeter"},
     ))
     baseline = calculate_line_electrical_parameters(original)
     assert alternate.electrical.scalars == pytest.approx(

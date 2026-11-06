@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from transmissionlines.models.base import LineDataModel, OperationAttribute
 from transmissionlines.system import SCHEMA_VERSION, TransmissionLineSystem
-from transmissionlines.units import Amperes, Feet, Kilovolts, Quantity
+from transmissionlines.units import Amperes, Feet, Kilovolts
 
 
 class ProbeValue(LineDataModel):
@@ -87,7 +87,7 @@ def test_unit_named_floats_survive_json_round_trip(
     system = TransmissionLineSystem(name="quantity-test")
     bus_a = ProbeBus(
         name="bus-a",
-        location=ProbeValue(label="a", clearance_ft=Quantity(36, "inch")),
+        location=ProbeValue(label="a", clearance_ft={"value": 36, "unit": "inch"}),
     )
     bus_b = ProbeBus(
         name="bus-b",
@@ -263,7 +263,7 @@ def test_unit_fields_store_floats_and_convert_quantities() -> None:
     from transmissionlines.models.geometry import CablePosition
 
     assert CablePosition(x_ft=3, y_ft=30).x_ft == 3.0
-    assert CablePosition(x_ft=Quantity(1, "meter"), y_ft=30).x_ft == pytest.approx(3.28084, rel=1e-5)
-    assert BundleSpec(subconductor_count=2, subconductor_spacing_in=Quantity(1.5, "foot")).subconductor_spacing_in == 18
-    with pytest.raises(ValidationError, match="expected a quantity convertible to foot"):
-        CablePosition(x_ft=Quantity(1, "second"), y_ft=30)
+    assert CablePosition(x_ft={"value": 1, "unit": "meter"}, y_ft=30).x_ft == pytest.approx(3.28084, rel=1e-5)
+    assert BundleSpec(subconductor_count=2, subconductor_spacing_in={"value": 1.5, "unit": "foot"}).subconductor_spacing_in == 18
+    with pytest.raises(ValidationError, match="is incompatible with"):
+        CablePosition(x_ft={"value": 1, "unit": "second"}, y_ft=30)

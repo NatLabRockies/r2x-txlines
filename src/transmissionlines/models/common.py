@@ -4,7 +4,7 @@ from infrasys import Component
 from pydantic import model_validator
 
 from transmissionlines.models.base import LineDataModel
-from transmissionlines.units import Degrees, Feet
+from transmissionlines.units import Degrees, OptionalFeet
 from transmissionlines.models.geometry import CablePosition, GroundWirePosition, PhasePosition
 
 
@@ -13,7 +13,7 @@ class GeographicPoint(LineDataModel):
 
     latitude_deg: Degrees
     longitude_deg: Degrees
-    elevation_ft: Feet | None = None
+    elevation_ft: OptionalFeet = None
 
     @model_validator(mode="after")
     def validate_wgs84_coordinates(self) -> "GeographicPoint":

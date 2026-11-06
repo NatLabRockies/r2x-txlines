@@ -3,6 +3,7 @@ from math import pi
 
 import pytest
 from infrasys import Component
+from infrasys.base_quantity import ureg
 from pydantic import ValidationError
 
 from transmissionlines.builders.system import assemble_line_into_system
@@ -19,7 +20,6 @@ from transmissionlines.models.configurations import CircuitConfiguration, TowerC
 from transmissionlines.models.geometry import GroundWirePosition, PhasePosition, TowerGeometry
 from transmissionlines.models.routing import ElectricalTower, LineSpan, RouteGeometry, StartEnd
 from transmissionlines.system import TransmissionLineSystem
-from transmissionlines.units import Quantity
 
 
 def _configuration() -> TowerConfiguration:
@@ -107,12 +107,25 @@ def test_bus_and_tower_reject_out_of_range_wgs84_locations(
 
 
 def test_wgs84_boundaries_accept_radian_coordinates() -> None:
-    location = GeographicPoint(latitude_deg=Quantity(pi / 2, "radian"), longitude_deg=Quantity(-pi, "radian"))
+    location = GeographicPoint(latitude_deg={"value": pi / 2, "unit": "radian"}, longitude_deg={"value": -pi, "unit": "radian"})
     assert Bus(name="boundary", location=location).location is location
     assert ElectricalTower(
         name="boundary-tower", tower_id="T1", sequence=0, location=location,
         configuration=_configuration(), structure_form="pole", support_role="terminal",
     ).location is location
+
+
+@pytest.mark.parametrize("field", ["latitude_deg", "elevation_ft"])
+def test_dimensionless_pint_quantity_does_not_coerce_to_a_bare_float(field: str) -> None:
+    point = {"latitude_deg": 10, "longitude_deg": 20} | {field: (pi / 2) * ureg.radian}
+    with pytest.raises(ValidationError, match="Pint quantity not accepted"):
+        GeographicPoint(**point)
+
+
+def test_optional_measurements_keep_unit_metadata() -> None:
+    assert GeographicPoint.unit_specs["elevation_ft"].unit == "foot"
+    assert BareConductorEquipment.unit_specs["gmr_ft"].unit == "foot"
+    assert "gmr_ft='0.03 foot'" in repr(BareConductorEquipment(gmr_ft=0.03))
 
 
 def test_routed_line_requires_real_ordered_spans_and_terminal_towers() -> None:

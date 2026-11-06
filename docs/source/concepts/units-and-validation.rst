@@ -5,11 +5,12 @@ Unit boundary
 -------------
 
 Model fields are plain floats whose name states the unit: ``x_ft``,
-``nominal_voltage_kv``, ``ac_resistance_ohm_kft``. A field also accepts a pint
-quantity of the right dimension, converted on the way in, so
-``nominal_voltage_kv=Quantity(230_000, "volt")`` stores ``230.0``; a quantity of
-the wrong dimension is rejected. ``Quantity`` is importable from
-``transmissionlines.units``. Calculations receive only the floats.
+``nominal_voltage_kv``, ``ac_resistance_ohm_kft``. The field types in
+``transmissionlines.units`` use r2x-core ``Unit`` annotations, so a field also
+accepts a value in another unit as a mapping, converted on the way in:
+``nominal_voltage_kv={"value": 230_000, "unit": "volt"}`` stores ``230.0``, and
+a unit of the wrong dimension is rejected. Pint quantities are not accepted.
+Calculations receive only the floats.
 
 .. list-table::
    :header-rows: 1
