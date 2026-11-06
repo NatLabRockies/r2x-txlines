@@ -52,7 +52,7 @@ def test_capacitance_radius_is_optional_parity_extension() -> None:
 def test_mechanical_quantities_round_trip_and_reject_wrong_dimensions() -> None:
     equipment = BareConductorEquipment(
         weight_lb_kft={"value": 0.5, "unit": "pound_force / foot"},
-        rated_strength_lb=2000,
+        rated_strength_lb={"value": 2, "unit": "kip"},
         total_area_in2=0.75,
     )
     restored = BareConductorEquipment.model_validate_json(equipment.model_dump_json())

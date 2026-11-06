@@ -3,6 +3,7 @@ from math import pi
 
 import pytest
 from infrasys import Component
+from infrasys.base_quantity import ureg
 from pydantic import ValidationError
 
 from transmissionlines.builders.system import assemble_line_into_system
@@ -112,6 +113,19 @@ def test_wgs84_boundaries_accept_radian_coordinates() -> None:
         name="boundary-tower", tower_id="T1", sequence=0, location=location,
         configuration=_configuration(), structure_form="pole", support_role="terminal",
     ).location is location
+
+
+@pytest.mark.parametrize("field", ["latitude_deg", "elevation_ft"])
+def test_dimensionless_pint_quantity_does_not_coerce_to_a_bare_float(field: str) -> None:
+    point = {"latitude_deg": 10, "longitude_deg": 20} | {field: (pi / 2) * ureg.radian}
+    with pytest.raises(ValidationError, match="Pint quantity not accepted"):
+        GeographicPoint(**point)
+
+
+def test_optional_measurements_keep_unit_metadata() -> None:
+    assert GeographicPoint.unit_specs["elevation_ft"].unit == "foot"
+    assert BareConductorEquipment.unit_specs["gmr_ft"].unit == "foot"
+    assert "gmr_ft='0.03 foot'" in repr(BareConductorEquipment(gmr_ft=0.03))
 
 
 def test_routed_line_requires_real_ordered_spans_and_terminal_towers() -> None:

@@ -10,29 +10,29 @@ from pydantic import model_validator
 from transmissionlines.models.base import LineDataModel
 from transmissionlines.models.common import CatalogReference
 from transmissionlines.units import (
-    Amperes,
-    Feet,
-    Inches,
-    OhmsPerKilofoot,
-    Pounds,
-    PoundsPerKilofoot,
-    SquareInches,
+    OptionalAmperes,
+    OptionalFeet,
+    OptionalInches,
+    OptionalOhmsPerKilofoot,
+    OptionalPounds,
+    OptionalPoundsPerKilofoot,
+    OptionalSquareInches,
 )
 
 
 class BareConductorEquipment(LineDataModel):
     """Measured or manufacturer-provided conductor properties."""
 
-    diameter_in: Inches | None = None
-    gmr_ft: Feet | None = None
-    capacitance_radius_ft: Feet | None = None
-    ampacity_a: Amperes | None = None
-    ac_resistance_ohm_kft: OhmsPerKilofoot | None = None
-    emergency_ampacity_a: Amperes | None = None
-    dc_resistance_ohm_kft: OhmsPerKilofoot | None = None
-    weight_lb_kft: PoundsPerKilofoot | None = None
-    rated_strength_lb: Pounds | None = None
-    total_area_in2: SquareInches | None = None
+    diameter_in: OptionalInches = None
+    gmr_ft: OptionalFeet = None
+    capacitance_radius_ft: OptionalFeet = None
+    ampacity_a: OptionalAmperes = None
+    ac_resistance_ohm_kft: OptionalOhmsPerKilofoot = None
+    emergency_ampacity_a: OptionalAmperes = None
+    dc_resistance_ohm_kft: OptionalOhmsPerKilofoot = None
+    weight_lb_kft: OptionalPoundsPerKilofoot = None
+    rated_strength_lb: OptionalPounds = None
+    total_area_in2: OptionalSquareInches = None
 
     @model_validator(mode="after")
     def validate_measurements(self) -> "BareConductorEquipment":
@@ -48,7 +48,7 @@ class BundleSpec(LineDataModel):
     """Describe the number and separation of installed subconductors."""
 
     subconductor_count: int
-    subconductor_spacing_in: Inches | None = None
+    subconductor_spacing_in: OptionalInches = None
 
     @model_validator(mode="after")
     def validate_spacing(self) -> "BundleSpec":
