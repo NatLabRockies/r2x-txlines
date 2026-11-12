@@ -7,7 +7,7 @@ name = "transmissionlines"
 version = "0.1.0"
 description = "Transmission line modeling migration foundation."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 dependencies = [
   "infrasys>=1.2.1,<2",
   "numpy>=2",
@@ -17,6 +17,8 @@ dependencies = [
   "openpyxl>=3.1",
   "pymupdf>=1.26,<2",
   "matplotlib>=3.8",
+  # PyPI 0.9.0 ignores the input unit on fields without a base; use the fixed commit until 1.0.
+  "r2x-core @ git+https://github.com/NatLabRockies/r2x-core@d090584fb69d642a0f745bef3491a70c3780d261",
 ]
 
 [project.optional-dependencies]

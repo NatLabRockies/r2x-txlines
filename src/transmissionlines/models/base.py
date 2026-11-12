@@ -4,9 +4,10 @@ from abc import ABC
 
 from infrasys import SupplementalAttribute
 from pydantic import BaseModel, ConfigDict
+from r2x_core import HasUnits
 
 
-class LineDataModel(BaseModel):
+class LineDataModel(HasUnits, BaseModel):
     """Base class for immutable embedded transmission-line value models.
 
     Value models are serialized by value inside registered Infrasys components or

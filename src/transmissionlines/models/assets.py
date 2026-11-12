@@ -5,6 +5,7 @@ import math
 
 from infrasys import Component
 from pydantic import ConfigDict, model_validator
+from r2x_core import HasUnits
 
 from transmissionlines.models.common import Bus
 from transmissionlines.models.configurations import TowerConfiguration
@@ -12,7 +13,7 @@ from transmissionlines.models.routing import LineSpan
 from transmissionlines.units import Hertz, Kilovolts, OhmMeters
 
 
-class AbstractTransmissionLine(Component, ABC):
+class AbstractTransmissionLine(HasUnits, Component, ABC):
     """Hold shared, positive electrical inputs for a transmission line."""
 
     model_config = ConfigDict(extra="forbid")

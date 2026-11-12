@@ -14,7 +14,6 @@ from transmissionlines.models.cables import BareConductorEquipment
 from transmissionlines.models.configurations import TowerConfiguration
 from transmissionlines.models.geometry import PhasePosition, TowerGeometry
 from transmissionlines.models.sag import SagCurveResult, SagOptions
-from transmissionlines.units import Quantity
 from test.integration.test_line_electrical_orchestration import _circuit, _line
 
 
@@ -53,12 +52,12 @@ def test_options_require_physical_quantities_and_convert_mixed_units() -> None:
     line = _mechanical_line()
     line.everyday_tension_fraction = 0.2
     mixed = _options(
-        reference_temperature_c=Quantity(77, "degF"),
-        operating_temperature_c=Quantity(348.15, "kelvin"),
-        span_start_ft=Quantity(121.92, "meter"),
+        reference_temperature_c={"value": 77, "unit": "degF"},
+        operating_temperature_c={"value": 348.15, "unit": "kelvin"},
+        span_start_ft={"value": 121.92, "unit": "meter"},
         span_stop_ft=400,
-        span_step_ft=Quantity(3.048, "meter"),
-        elevation_difference_ft=Quantity(30.48, "meter"),
+        span_step_ft={"value": 3.048, "unit": "meter"},
+        elevation_difference_ft={"value": 30.48, "unit": "meter"},
     )
     result = calculate_sag(line, options=mixed)
     expected = calculate_sag(line, options=_options(
@@ -196,8 +195,8 @@ def test_missing_mechanics_identifies_circuit_and_field(field: str) -> None:
 
 
 def test_options_and_line_tension_reject_invalid_inputs() -> None:
-    with pytest.raises(ValidationError, match="convertible to 1 / kelvin"):
-        _options(thermal_expansion_per_k=Quantity(1, "pound_force / kilofoot"))
+    with pytest.raises(ValidationError, match="is incompatible with"):
+        _options(thermal_expansion_per_k={"value": 1, "unit": "pound_force / kilofoot"})
     with pytest.raises(ValidationError, match="elastic_modulus"):
         _options(elastic_modulus_psi=0)
     with pytest.raises(ValidationError, match="span lengths"):

@@ -6,8 +6,8 @@ Embedded values
 
 Model fields store plain floats in the unit their name states (``x_ft``,
 ``nominal_voltage_kv``), so embedded values serialize as JSON numbers with no
-quantity metadata. Pint quantities are accepted on construction and converted
-to the field's unit; they are not restored on reload. Standalone result models store matrix values as real and
+quantity metadata. ``{"value": ..., "unit": ...}`` mappings are accepted on
+construction and converted to the field's unit; reloading gives the floats. Standalone result models store matrix values as real and
 imaginary numeric arrays with shape, labels, and unit metadata rather than
 Python complex values or opaque cells. Calculations return new results without
 updating the input components.
