@@ -88,3 +88,18 @@ def test_tower_rejects_positions_missing_a_declared_circuit(monkeypatch) -> None
             catalog, geometry_id=geometry_id, name="tower", ground_wire=wire,
             circuits=[dict(circuit_id=kept, conductor=conductor, bundle=build.bundle(subconductor_count=1), insulator=insulator)],
         )
+
+
+def test_every_geometry_with_ground_wires_builds_a_tower() -> None:
+    catalog = build.open_catalog()
+    conductor = build.conductor(catalog, record_id=catalog.conductors(family="ACSR")[0]["record_id"], gmr_ft=0.03)
+    wire = build.ground_wire(catalog, record_id=catalog.ground_wires(family="ACSR")[0]["record_id"])
+    insulator = dict(insulator_type="glass", number_of_insulators=12,
+                     insulator_code="U120B", insulator_coupling="ball_and_socket")
+    for geometry_id in catalog.repository.table("ground_wire_positions").geometry_id.unique():
+        tower = build.tower(
+            catalog, geometry_id=geometry_id, name="tower", ground_wire=wire,
+            circuits=[dict(circuit_id=circuit_id, conductor=conductor, bundle=build.bundle(subconductor_count=1), insulator=insulator)
+                      for circuit_id in catalog.tower_circuits(geometry_id)],
+        )
+        assert tower.identification_info.geometry_id == geometry_id
