@@ -16,11 +16,16 @@ Registered system
 -----------------
 
 ``TransmissionLineSystem`` is an Infrasys ``System`` with package schema
-version ``6.0.0``. Use the public Infrasys system serialization methods for the
-static input graph so component UUIDs and registered component references are
+version ``7.0.0``. Use the public Infrasys system serialization methods for the
+static input graph so component ids and registered component references are
 retained after reload. Older system files are rejected; there is no legacy
 upgrade or compatibility adapter. Electrical matrices, St. Clair curves, and
 other calculation results are not stored in the system JSON.
+
+Line validation compares components by object identity, so a ``model_copy()``
+of a bus or tower is a different component even when every field matches.
+Before schema ``7.0.0``, a copy kept the original's UUID and counted as the
+same component.
 
 The repository tests reload both concrete line types from new-schema system
 JSON, verify registered component references, and check that obsolete

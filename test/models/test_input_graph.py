@@ -164,7 +164,7 @@ def test_routed_line_rejects_disconnected_or_mismatched_geometry() -> None:
         RoutedTransmissionLine(**electrical, spans=[span.model_copy(update={
             "route_geometry": RouteGeometry(coordinates=[(-108, 45), (-106, 45)])
         })])
-    with pytest.raises(ValidationError, match="distinct supports"):
+    with pytest.raises(ValidationError, match="tower_id"):
         RoutedTransmissionLine(**electrical, spans=[span, span])
 
 
@@ -305,11 +305,11 @@ def test_builder_reuses_identical_configuration_and_rejects_conflicts_before_mut
             name="third", configuration=conflicting, **electrical,
         ))
     assert len(list(system.get_components(Component))) == before
-    colliding = CrossSectionTransmissionLine(
-        name="other", uuid=first.uuid, configuration=_configuration(), **electrical,
-    )
-    with pytest.raises(ValueError, match="component-uuid conflict"):
-        assemble_line_into_system(system, colliding)
+    foreign = assemble_line_into_system(TransmissionLineSystem(name="elsewhere"), CrossSectionTransmissionLine(
+        name="other", configuration=_configuration(), **electrical,
+    ))
+    with pytest.raises(ValueError, match="registered in another system"):
+        assemble_line_into_system(system, foreign)
     assert len(list(system.get_components(Component))) == before
 
 

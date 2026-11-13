@@ -55,7 +55,7 @@ class StartEnd(Component):
 
     @model_validator(mode="after")
     def validate_endpoints(self) -> "StartEnd":
-        if self.start.uuid == self.end.uuid:
+        if self.start is self.end:
             raise ValueError("span endpoint towers must differ")
         return self
 

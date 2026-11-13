@@ -434,24 +434,32 @@ wheels = [
 ]
 
 [[package]]
-name = "infrasys"
-version = "1.2.1"
+name = "infrastore"
+version = "0.15.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h5py" },
+    { name = "numpy" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/4e/ef0972e596385a59ac35b6d9834332fe4633cdf925e171f903f10f305dd6/infrastore-0.15.1-cp311-abi3-macosx_14_0_arm64.whl", hash = "sha256:044e8db183484986ef0b21d7b383c753fba49d11cd651b93fffa618913a592d9", size = 5434392, upload-time = "2026-10-24T16:22:51.429Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/95/24f5be55582b0aae0ca74206e14243dda17155bbb90b443b197e3856b21d/infrastore-0.15.1-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:d824e3ffd025c3e97ea4417785e5c0d1546eb9f78cc15d496b7681fccd65e2e6", size = 6633743, upload-time = "2026-10-24T16:22:53.09Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/5c/0a1bbe9f1fb7c5285caf56a26eb108f4695cf6b944f3b24a25b4a5f53961/infrastore-0.15.1-cp311-abi3-win_amd64.whl", hash = "sha256:9ec2ee4541607cf005858273ef59c6a53dbcda8a99ccd7befc1038b0a627a1ed", size = 7935902, upload-time = "2026-10-24T16:22:54.755Z" },
+]
+
+[[package]]
+name = "infrasys"
+version = "1.2.1"
+source = { git = "https://github.com/NatLabRockies/infrasys?rev=9b0d1b616ef4a76a43fcd2d62b745616ac93a28b#9b0d1b616ef4a76a43fcd2d62b745616ac93a28b" }
+dependencies = [
+    { name = "infrastore" },
     { name = "loguru" },
     { name = "numpy" },
     { name = "orjson" },
     { name = "pandas" },
     { name = "pint" },
-    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "rich" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/44/f0d55517e3c7d8321bf25de367fb4603b396e3f364108e7c50855fb2c540/infrasys-1.2.1.tar.gz", hash = "sha256:c8f752e94efe9582496b9fff3b54392ce574d9ad30cb46725ae059845f3f13c2", size = 70596, upload-time = "2026-08-28T21:37:36.006Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/96/58545fb6a6b3e1a0ae7da020a94143713ecf65646c76eae35b67858663d9/infrasys-1.2.1-py3-none-any.whl", hash = "sha256:2ecec0fe004f02f3abe577290af8a9193ddc4833d4e5dd45ab17a33027970715", size = 87156, upload-time = "2026-08-28T21:37:34.583Z" },
 ]
 
 [[package]]
@@ -1470,7 +1478,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "infrasys", specifier = ">=1.2.1,<2" },
+    { name = "infrasys", git = "https://github.com/NatLabRockies/infrasys?rev=9b0d1b616ef4a76a43fcd2d62b745616ac93a28b" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=2" },
     { name = "openpyxl", specifier = ">=3.1" },

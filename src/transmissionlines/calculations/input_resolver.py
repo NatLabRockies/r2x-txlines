@@ -34,10 +34,9 @@ def resolve_configuration(
     towers = [line.spans[0].start_end.start, *(span.start_end.end for span in line.spans)]
     if tower is not None:
         for owned in towers:
-            if owned.uuid == tower.uuid:
+            if owned is tower:
                 return owned.configuration
         raise ValueError("selected tower does not belong to this line")
-    configurations = {item.configuration.uuid for item in towers}
-    if len(configurations) != 1:
+    if any(item.configuration is not towers[0].configuration for item in towers):
         raise ValueError("routed line has different configurations; select a tower")
     return towers[0].configuration

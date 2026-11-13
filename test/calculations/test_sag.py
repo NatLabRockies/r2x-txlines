@@ -179,7 +179,7 @@ def test_all_circuits_and_explicit_selection_preserve_conductor_identity() -> No
     assert [curve.circuit_id for curve in result.curves] == ["c1", "c2"]
     assert result.curves[0].horizontal_tension_lb == [3900]
     assert result.curves[1].horizontal_tension_lb[0] != result.curves[0].horizontal_tension_lb[0]
-    assert result.curves[1].conductor_uuid == other.conductor_spec.uuid
+    assert result.curves[1].conductor_name == other.conductor_spec.name
     assert [curve.circuit_id for curve in calculate_sag(line, options=options, circuit_id="c2").curves] == ["c2"]
     with pytest.raises(ValueError, match="unknown circuit_id"):
         calculate_sag(line, options=options, circuit_id="absent")
@@ -235,7 +235,7 @@ def test_public_plot_and_result_round_trip() -> None:
     axes = plot_sag_curve(restored, circuit_id="c1")
 
     assert restored.options.elastic_modulus_psi == pytest.approx(11.5e6)
-    assert restored.curves[0].conductor_uuid == line.configuration.circuits[0].conductor_spec.uuid
+    assert restored.curves[0].conductor_name == line.configuration.circuits[0].conductor_spec.name
     assert axes.lines[0].get_xdata().tolist() == [20, 30, 40]
     assert axes.get_xlabel() == "Horizontal span (ft)"
     assert axes.get_ylabel() == "Maximum chord-relative sag (ft)"
