@@ -11,7 +11,7 @@ class LineDataModel(HasUnits, BaseModel):
     """Base class for immutable embedded transmission-line value models.
 
     Value models are serialized by value inside registered Infrasys components or
-    supplemental attributes. They intentionally have no UUID, system identity, or
+    supplemental attributes. They intentionally have no component id, system identity, or
     component name.
     """
 

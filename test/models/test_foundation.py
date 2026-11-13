@@ -245,7 +245,7 @@ def test_infrasys_does_not_round_trip_component_references_nested_inside_value_m
     loaded_bus = loaded.get_component(ProbeBus, "bus-a")
     loaded_line = loaded.get_component(ProbeNestedReferenceLine, "line")
 
-    assert loaded_line.nested.owner.uuid == loaded_bus.uuid
+    assert loaded_line.nested.owner.id == loaded_bus.id
     assert loaded_line.nested.owner is not loaded_bus
 
 

@@ -1,7 +1,6 @@
 """Immutable settings and external results for cross-section sag curves."""
 
 import math
-from uuid import UUID
 
 from pydantic import model_validator
 
@@ -46,7 +45,7 @@ class SagCurve(CalculationResultModel):
     """Store parallel span, maximum sag, and solved horizontal-tension arrays."""
 
     circuit_id: str
-    conductor_uuid: UUID
+    conductor_name: str
     conductor_family: str | None = None
     conductor_codeword: str | None = None
     stranding: str | None = None
@@ -60,7 +59,6 @@ class SagCurve(CalculationResultModel):
 class SagCurveResult(CalculationResultModel):
     """Keep calculated curves separate from the registered input graph."""
 
-    line_uuid: UUID
     line_name: str
     options: SagOptions
     everyday_tension_fraction: float

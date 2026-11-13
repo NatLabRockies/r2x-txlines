@@ -15,7 +15,7 @@ def _compatible(left: object, right: object) -> bool:
     if isinstance(left, BaseModel) and isinstance(right, BaseModel):
         return type(left) is type(right) and all(
             _compatible(getattr(left, field), getattr(right, field))
-            for field in type(left).model_fields if field != "uuid"
+            for field in type(left).model_fields if field != "id"
         )
     if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
         return len(left) == len(right) and all(
@@ -30,6 +30,13 @@ def _canonicalize(
     candidates: dict[tuple[type[Component], str], Component],
     additions: list[Component],
 ) -> Component:
+    if component.id is not None:
+        try:
+            owner = system.get_component_by_id(component.id)
+        except ISNotStored:
+            owner = None
+        if owner is not component:
+            raise ValueError(f"{type(component).__name__} {component.name!r} is registered in another system")
     changes = {}
     for field in type(component).model_fields:
         value = getattr(component, field)
@@ -40,23 +47,12 @@ def _canonicalize(
     if changes:
         values = {
             field: changes.get(field, getattr(component, field))
-            for field in type(component).model_fields
+            for field in type(component).model_fields if field != "id"
         }
         candidate = type(component)(**values)
     else:
         candidate = component
     key = (type(candidate), candidate.name)
-    try:
-        uuid_owner = system.get_component_by_uuid(candidate.uuid)
-    except ISNotStored:
-        uuid_owner = None
-    if uuid_owner is not None and (type(uuid_owner), uuid_owner.name) != key:
-        raise ValueError(f"component-uuid conflict for {type(candidate).__name__} {candidate.name!r}")
-    if any(
-        proposed.uuid == candidate.uuid and (type(proposed), proposed.name) != key
-        for proposed in additions
-    ):
-        raise ValueError(f"component-uuid conflict for {type(candidate).__name__} {candidate.name!r}")
     existing = candidates.get(key)
     if existing is None:
         try:

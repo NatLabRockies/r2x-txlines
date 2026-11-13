@@ -68,11 +68,9 @@ class RoutedTransmissionLine(AbstractTransmissionLine):
     def validate_route(self) -> "RoutedTransmissionLine":
         if not self.spans:
             raise ValueError("routed line requires nonempty spans")
-        if self.from_bus.uuid == self.to_bus.uuid:
+        if self.from_bus is self.to_bus:
             raise ValueError("from_bus and to_bus must be distinct")
         towers = [self.spans[0].start_end.start, *(span.start_end.end for span in self.spans)]
-        if len({tower.uuid for tower in towers}) != len(towers):
-            raise ValueError("ordered spans must have distinct supports")
         if len({tower.tower_id for tower in towers}) != len(towers):
             raise ValueError("tower_id values must be unique within a routed line")
         if len({span.span_id for span in self.spans}) != len(self.spans):
@@ -85,7 +83,7 @@ class RoutedTransmissionLine(AbstractTransmissionLine):
             start, end = span.start_end.start, span.start_end.end
             if span.sequence != index or start.sequence != index or end.sequence != index + 1:
                 raise ValueError("spans and endpoint towers must be in sequence order")
-            if index and self.spans[index - 1].start_end.end.uuid != start.uuid:
+            if index and self.spans[index - 1].start_end.end is not start:
                 raise ValueError("adjacent spans must share an endpoint tower")
             coordinates = span.route_geometry.coordinates
             for coordinate, tower in ((coordinates[0], start), (coordinates[-1], end)):
