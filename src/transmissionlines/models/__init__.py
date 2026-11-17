@@ -13,6 +13,7 @@ from transmissionlines.models.cables import (
     ConductorSpec,
     GroundWireSpec,
     InsulatorStringSpec,
+    ResistanceAtTemperature,
 )
 from transmissionlines.models.geometry import TowerGeometry
 from transmissionlines.models.common import (
@@ -50,6 +51,7 @@ __all__ = [
     "IdentificationInfo",
     "GroundWireSpec",
     "InsulatorStringSpec",
+    "ResistanceAtTemperature",
     "LineCalculationResult",
     "LineSpan",
     "LineDataModel",

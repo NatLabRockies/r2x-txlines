@@ -10,6 +10,8 @@ from pydantic import model_validator
 from transmissionlines.models.base import LineDataModel
 from transmissionlines.models.common import CatalogReference
 from transmissionlines.units import (
+    Celsius,
+    OhmsPerKilofoot,
     OptionalAmperes,
     OptionalFeet,
     OptionalInches,
@@ -20,9 +22,30 @@ from transmissionlines.units import (
 )
 
 
-class BareConductorEquipment(LineDataModel):
-    """Measured or manufacturer-provided conductor properties."""
+class ResistanceAtTemperature(LineDataModel):
+    """One published AC resistance and the conductor temperature it applies at."""
 
+    temperature_c: Celsius
+    ac_resistance_ohm_kft: OhmsPerKilofoot
+
+    @model_validator(mode="after")
+    def validate_resistance(self) -> "ResistanceAtTemperature":
+        if not (math.isfinite(self.temperature_c) and math.isfinite(self.ac_resistance_ohm_kft)):
+            raise ValueError("temperature and resistance must be finite")
+        if self.ac_resistance_ohm_kft <= 0:
+            raise ValueError("ac_resistance_ohm_kft must be positive")
+        return self
+
+
+class BareConductorEquipment(LineDataModel):
+    """Measured or manufacturer-provided conductor properties.
+
+    ``ac_resistance_ohm_kft`` is the single resistance used for impedances.
+    ``ac_resistances`` lists every published (temperature, resistance) pair, which
+    thermal ratings interpolate between.
+    """
+
+    ac_resistances: tuple[ResistanceAtTemperature, ...] = ()
     diameter_in: OptionalInches = None
     gmr_ft: OptionalFeet = None
     capacitance_radius_ft: OptionalFeet = None
@@ -39,8 +62,11 @@ class BareConductorEquipment(LineDataModel):
         """Reject nonpositive or non-finite measurements; absent ones stay None."""
         for field in type(self).model_fields:
             value = getattr(self, field)
-            if value is not None and not (math.isfinite(value) and value > 0):
+            if field != "ac_resistances" and value is not None and not (math.isfinite(value) and value > 0):
                 raise ValueError(f"{field} must be finite and positive")
+        temperatures = [point.temperature_c for point in self.ac_resistances]
+        if len(set(temperatures)) != len(temperatures):
+            raise ValueError("ac_resistances temperatures must be distinct")
         return self
 
 
@@ -114,4 +140,5 @@ __all__ = [
     "ConductorSpec",
     "GroundWireSpec",
     "InsulatorStringSpec",
+    "ResistanceAtTemperature",
 ]
