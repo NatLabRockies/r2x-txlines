@@ -10,15 +10,15 @@ from transmissionlines.models.cables import (
     BareConductorEquipment, BundleSpec, ConductorSpec, ResistanceAtTemperature,
 )
 
-_DRY_SUNNY = dict(
+_SUNNY = dict(
     diameter_m=0.028, resistance_ohm_m=8.7e-5, conductor_temperature_k=348.15,
     air_temperature_k=303.15, wind_speed_m_s=2.0, wind_angle_deg=90.0,
-    pressure_pa=101325.0, ghi_w_m2=800.0, emissivity=0.8, absorptivity=0.8,
+    pressure_pa=101325.0, relative_humidity=0.5, ghi_w_m2=800.0, emissivity=0.8, absorptivity=0.8,
 )
 
 
 def _rate(**overrides) -> np.ndarray:
-    return ampacity(**{**_DRY_SUNNY, **overrides})
+    return ampacity(**{**_SUNNY, **overrides})
 
 
 def _points(*pairs: tuple[float, float]) -> tuple[ResistanceAtTemperature, ...]:
@@ -42,6 +42,21 @@ def test_rating_rises_with_wind_and_falls_with_air_temperature() -> None:
     by_air = _rate(air_temperature_k=np.linspace(250, 340, 50))
     assert np.all(np.diff(by_wind) >= 0)
     assert np.all(np.diff(by_air) < 0)
+
+
+def test_humid_air_cools_less_than_dry_air() -> None:
+    # Water vapor is lighter than dry air, so humid air is less dense.
+    by_humidity = _rate(relative_humidity=np.linspace(0, 1, 11))
+    assert np.all(np.diff(by_humidity) < 0)
+
+
+def test_weather_humidity_column_overrides_the_default() -> None:
+    bundle = BundleSpec(subconductor_count=1)
+    default = conductor_ampacity(_conductor(), bundle, _weather(), wind_angle_deg=90)
+    dry = conductor_ampacity(_conductor(), bundle, _weather(relative_humidity=0.0), wind_angle_deg=90)
+    explicit = conductor_ampacity(_conductor(), bundle, _weather(relative_humidity=0.5), wind_angle_deg=90)
+    assert (dry > default).all()
+    pd.testing.assert_series_equal(explicit, default)
 
 
 def test_crosswind_cools_more_than_wind_along_the_line() -> None:
@@ -76,6 +91,7 @@ def test_bundle_carries_its_subconductor_count_times_one_conductor() -> None:
 
 _MANUFACTURER_CONDITIONS = dict(  # stated on both sheets below (IEEE 738, sea level, full sun)
     air_temperature_k=[298.15], wind_speed_m_s=[0.6096], pressure_pa=[101325.0], ghi_w_m2=[1033.0],
+    relative_humidity=[0.0],  # unstated; IEEE 738's own air density ignores humidity
 )
 
 
@@ -144,6 +160,7 @@ def test_catalog_conductor_keeps_every_published_resistance() -> None:
     ({"air_temperature_k": 30.0}, "check units"),
     ({"pressure_pa": 101.3}, "check units"),
     ({"wind_speed_m_s": -1.0}, "nonnegative"),
+    ({"relative_humidity": 50.0}, "not a percentage"),
 ])
 def test_weather_in_wrong_units_is_rejected(overrides: dict, message: str) -> None:
     with pytest.raises(ValueError, match=message):

@@ -39,7 +39,10 @@ cooling minus solar heating at the allowed conductor temperature:
 
 Convective cooling is the largest of the natural, low-wind and high-wind forms.
 Solar heating is ``GHI · D · α``, without the standard's sun-angle geometry.
-Air density comes from the ideal gas law for dry air at the film temperature.
+Air density comes from the ideal gas law for moist air at the film temperature.
+The water vapor partial pressure is relative humidity times the Tetens saturation
+pressure at the *air* temperature; heating air to the film temperature at constant
+total pressure leaves that partial pressure unchanged.
 """
 
 from bisect import bisect
@@ -54,10 +57,14 @@ from transmissionlines.models.cables import BundleSpec, ConductorSpec, Resistanc
 C_TO_K = 273.15
 STEFAN_BOLTZMANN_W_M2_K4 = 5.670374419e-8
 DRY_AIR_GAS_CONSTANT_J_KG_K = 287.058
+WATER_VAPOR_GAS_CONSTANT_J_KG_K = 461.495
 METERS_PER_INCH = 0.0254
 METERS_PER_KILOFOOT = 304.8
 
 WEATHER_COLUMNS = ("air_temperature_k", "wind_speed_m_s", "pressure_pa", "ghi_w_m2")
+# Optional weather column, a fraction; DynamicLineRatings' default is used when absent.
+HUMIDITY_COLUMN = "relative_humidity"
+DEFAULT_RELATIVE_HUMIDITY = 0.5
 # Bounds that catch values given in the wrong unit (°C for K, kPa for Pa).
 _AIR_TEMPERATURE_RANGE_K = (180.0, 340.0)
 _PRESSURE_RANGE_PA = (40e3, 110e3)
@@ -72,13 +79,15 @@ def ampacity(
     wind_speed_m_s: ArrayLike,
     wind_angle_deg: ArrayLike,
     pressure_pa: ArrayLike,
+    relative_humidity: ArrayLike,
     ghi_w_m2: ArrayLike,
     emissivity: ArrayLike,
     absorptivity: ArrayLike,
 ) -> np.ndarray:
     """Return the steady-state rating of one conductor, in amperes.
 
-    All inputs are SI and broadcast together. ``wind_angle_deg`` is the angle
+    All inputs are SI and broadcast together; ``relative_humidity`` is a fraction
+    (0–1) of saturation at the air temperature. ``wind_angle_deg`` is the angle
     between the wind and the conductor axis; any angle is accepted and folded into
     0–90°. Conditions where the conductor cannot be held at its allowed
     temperature (air hotter than the conductor, or sun alone heating it past
@@ -89,7 +98,12 @@ def ampacity(
     angle = np.asarray(wind_angle_deg, float)
     film_k = (t_c + t_a) / 2
     film_c = film_k - C_TO_K
-    density = np.asarray(pressure_pa, float) / (DRY_AIR_GAS_CONSTANT_J_KG_K * film_k)
+    air_c = t_a - C_TO_K
+    vapor_pa = np.asarray(relative_humidity, float) * 610.78 * np.exp(17.27 * air_c / (air_c + 237.3))
+    density = (
+        (np.asarray(pressure_pa, float) - vapor_pa) / DRY_AIR_GAS_CONSTANT_J_KG_K
+        + vapor_pa / WATER_VAPOR_GAS_CONSTANT_J_KG_K
+    ) / film_k
     viscosity = 1.458e-6 * film_k**1.5 / (film_c + 383.4)
     conductivity = 2.424e-2 + 7.477e-5 * film_c - 4.407e-9 * film_c**2
     folded = np.deg2rad(90 - np.abs(np.remainder(np.abs(angle), 180) - 90))
@@ -142,6 +156,8 @@ def validate_weather(weather: pd.DataFrame) -> pd.DataFrame:
             raise ValueError(f"{column} outside {low}–{high}; check units")
     if (weather["wind_speed_m_s"] < 0).any() or (weather["ghi_w_m2"] < 0).any():
         raise ValueError("wind_speed_m_s and ghi_w_m2 must be nonnegative")
+    if HUMIDITY_COLUMN in weather and not weather[HUMIDITY_COLUMN].between(0, 1).all():
+        raise ValueError(f"{HUMIDITY_COLUMN} must be a fraction between 0 and 1, not a percentage")
     return weather
 
 
@@ -158,7 +174,8 @@ def conductor_ampacity(
     """Rate one bundled phase for each weather row, in amperes.
 
     The bundle carries ``subconductor_count`` times the single-conductor rating.
-    Emissivity and absorptivity default to DynamicLineRatings' 0.8.
+    Emissivity and absorptivity default to DynamicLineRatings' 0.8. Without a
+    ``relative_humidity`` column, humidity is 0.5.
     """
     weather = validate_weather(weather)
     equipment = conductor.equipment
@@ -173,6 +190,9 @@ def conductor_ampacity(
         wind_speed_m_s=weather["wind_speed_m_s"].to_numpy(),
         wind_angle_deg=np.asarray(wind_angle_deg, float),
         pressure_pa=weather["pressure_pa"].to_numpy(),
+        relative_humidity=(
+            weather[HUMIDITY_COLUMN].to_numpy() if HUMIDITY_COLUMN in weather else DEFAULT_RELATIVE_HUMIDITY
+        ),
         ghi_w_m2=weather["ghi_w_m2"].to_numpy(),
         emissivity=emissivity,
         absorptivity=absorptivity,
