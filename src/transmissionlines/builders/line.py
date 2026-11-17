@@ -7,7 +7,9 @@ from math import isfinite
 from typing import Any
 
 from transmissionlines.catalog.schemas import ConductorRecord, GroundWireRecord, PhasePositionRecord, GroundWirePositionRecord
-from transmissionlines.models.cables import BareConductorEquipment, BundleSpec, ConductorSpec, GroundWireSpec, InsulatorStringSpec
+from transmissionlines.models.cables import (
+    BareConductorEquipment, BundleSpec, ConductorSpec, GroundWireSpec, InsulatorStringSpec, ResistanceAtTemperature,
+)
 from transmissionlines.models.common import CatalogReference
 from transmissionlines.models.configurations import CircuitConfiguration
 from transmissionlines.models.geometry import GroundWirePosition, PhasePosition, TowerGeometry
@@ -94,7 +96,15 @@ def conductor_from_record(
     resistance = select_phase_resistance(
         *(None if value is None else float(value) for value in resistances)
     ) if any(value is not None for value in resistances) else None
+    published = {
+        25: record.ac_resistance_25c_ohm_kft, 50: record.ac_resistance_50c_ohm_kft,
+        75: record.ac_resistance_75c_ohm_kft, 200: record.ac_resistance_200c_ohm_kft,
+    }
     values = BareConductorEquipment(
+        ac_resistances=tuple(
+            ResistanceAtTemperature(temperature_c=temperature, ac_resistance_ohm_kft=value)
+            for temperature, value in published.items() if value is not None
+        ),
         diameter_in=record.diameter_inch,
         gmr_ft=_conductor_gmr(record, gmr_ft=gmr_ft),
         capacitance_radius_ft=None if record.capacitance_reactance_mohm_kft is None else req_from_xc(record.capacitance_reactance_mohm_kft),
