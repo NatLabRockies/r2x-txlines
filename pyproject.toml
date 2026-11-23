@@ -19,6 +19,7 @@ dependencies = [
   "matplotlib>=3.8",
   # PyPI 0.9.0 ignores the input unit on fields without a base; use the fixed commit until 1.0.
   "r2x-core @ git+https://github.com/NatLabRockies/r2x-core@d090584fb69d642a0f745bef3491a70c3780d261",
+  "pyproj>=3.6",
 ]
 
 [project.optional-dependencies]
