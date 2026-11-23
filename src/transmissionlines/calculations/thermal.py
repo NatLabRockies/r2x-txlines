@@ -180,26 +180,47 @@ def conductor_ampacity(
     if not (0 <= emissivity <= 1 and 0 <= absorptivity <= 1):
         raise ValueError("emissivity and absorptivity must be fractions between 0 and 1")
     weather = validate_weather(weather)
-    equipment = conductor.equipment
-    if equipment.diameter_in is None:
-        raise ValueError(f"{conductor.name}: missing diameter_in")
-    resistance = ac_resistance_at(equipment.ac_resistances, conductor_temperature_c)
     amps = ampacity(
-        diameter_m=equipment.diameter_in * METERS_PER_INCH,
-        resistance_ohm_m=resistance / METERS_PER_KILOFOOT,
-        conductor_temperature_k=conductor_temperature_c + C_TO_K,
-        air_temperature_k=weather["air_temperature_k"].to_numpy(),
-        wind_speed_m_s=weather["wind_speed_m_s"].to_numpy(),
+        **conductor_inputs(conductor, conductor_temperature_c),
+        **weather_inputs(weather),
         wind_angle_deg=np.asarray(wind_angle_deg, float),
-        pressure_pa=weather["pressure_pa"].to_numpy(),
-        relative_humidity=(
-            weather[HUMIDITY_COLUMN].to_numpy() if HUMIDITY_COLUMN in weather else DEFAULT_RELATIVE_HUMIDITY
-        ),
-        ghi_w_m2=weather["ghi_w_m2"].to_numpy(),
         emissivity=emissivity,
         absorptivity=absorptivity,
     )
     return pd.Series(bundle.subconductor_count * amps, index=weather.index, name="ampacity_a")
 
 
-__all__ = ["ac_resistance_at", "ampacity", "conductor_ampacity", "validate_weather"]
+def conductor_inputs(conductor: ConductorSpec, conductor_temperature_c: float) -> dict[str, float]:
+    """Return the SI conductor arguments of :func:`ampacity`."""
+    equipment = conductor.equipment
+    if equipment.diameter_in is None:
+        raise ValueError(f"{conductor.name}: missing diameter_in")
+    resistance = ac_resistance_at(equipment.ac_resistances, conductor_temperature_c)
+    return {
+        "diameter_m": equipment.diameter_in * METERS_PER_INCH,
+        "resistance_ohm_m": resistance / METERS_PER_KILOFOOT,
+        "conductor_temperature_k": conductor_temperature_c + C_TO_K,
+    }
+
+
+def weather_inputs(weather: pd.DataFrame) -> dict[str, np.ndarray | float]:
+    """Return the weather arguments of :func:`ampacity` from a validated weather table."""
+    return {
+        "air_temperature_k": weather["air_temperature_k"].to_numpy(),
+        "wind_speed_m_s": weather["wind_speed_m_s"].to_numpy(),
+        "pressure_pa": weather["pressure_pa"].to_numpy(),
+        "relative_humidity": (
+            weather[HUMIDITY_COLUMN].to_numpy() if HUMIDITY_COLUMN in weather else DEFAULT_RELATIVE_HUMIDITY
+        ),
+        "ghi_w_m2": weather["ghi_w_m2"].to_numpy(),
+    }
+
+
+__all__ = [
+    "ac_resistance_at",
+    "ampacity",
+    "conductor_ampacity",
+    "conductor_inputs",
+    "validate_weather",
+    "weather_inputs",
+]

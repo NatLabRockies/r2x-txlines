@@ -6,37 +6,20 @@ piece's midpoint, in degrees clockwise from true north, so it is the direction t
 conductor actually runs where the piece's weather is sampled.
 """
 
-from dataclasses import dataclass
-
 import numpy as np
 from pyproj import Geod
 
 from transmissionlines.models.assets import RoutedTransmissionLine
 from transmissionlines.models.routing import LineSpan, RouteGeometry
+from transmissionlines.models.thermal import Piece
 
-_WGS84 = Geod(ellps="WGS84")
-
-
-@dataclass(frozen=True)
-class Piece:
-    """One straight stretch of a route.
-
-    Coordinates are ``(longitude, latitude)`` in degrees. ``span`` is the span the
-    piece belongs to, or ``None`` for a bare route, which has no towers and so no sag.
-    """
-
-    start: tuple[float, float]
-    end: tuple[float, float]
-    midpoint: tuple[float, float]
-    length_m: float
-    bearing_deg: float
-    span: LineSpan | None = None
+WGS84 = Geod(ellps="WGS84")
 
 
 def _route_pieces(coordinates: list[tuple[float, float]], span: LineSpan | None) -> list[Piece]:
     lon, lat = np.asarray(coordinates, dtype=float).T
-    azimuth, _, length = _WGS84.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
-    mid_lon, mid_lat, back_azimuth = _WGS84.fwd(lon[:-1], lat[:-1], azimuth, length / 2)
+    azimuth, _, length = WGS84.inv(lon[:-1], lat[:-1], lon[1:], lat[1:])
+    mid_lon, mid_lat, back_azimuth = WGS84.fwd(lon[:-1], lat[:-1], azimuth, length / 2)
     bearing = (np.asarray(back_azimuth) + 180) % 360
     return [
         Piece(
