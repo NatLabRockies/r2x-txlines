@@ -1,8 +1,9 @@
 """Hourly weather for thermal ratings from NREL's WIND Toolkit (WTK) and NSRDB.
 
 Air temperature and wind at 10 m, surface pressure and relative humidity come from
-WTK CONUS; global horizontal irradiance from the NSRDB GOES aggregated v4 grid,
-taking the NSRDB cell nearest each WTK cell and its on-the-hour values. Data are
+WTK CONUS; global horizontal irradiance from the NSRDB GOES aggregated v4 grid, at
+its on-the-hour values. The two grids differ, so they are returned as two weather
+sources, each with the cells nearest the requested points. Data are
 read over NREL's HSDS service, which needs the ``weather`` extra and an
 ``~/.hscfg`` holding an NREL API key; a path that exists on disk (e.g. on an HPC
 system) is read directly instead.
@@ -136,13 +137,14 @@ def fetch_weather(
     cache_dir: str | Path | None = None,
     wtk_path: str = WTK_PATH,
     nsrdb_path: str = NSRDB_PATH,
-) -> dict[tuple[float, float], pd.DataFrame]:
-    """Return hourly weather at the WTK cells nearest the given points.
+) -> tuple[dict[tuple[float, float], pd.DataFrame], dict[tuple[float, float], pd.DataFrame]]:
+    """Return hourly WTK weather and NSRDB sunlight at the cells nearest the given points.
 
     Parameters
     ----------
     points : iterable of (longitude, latitude)
-        Places needing weather, e.g. the midpoints of a line's pieces.
+        Places needing weather, normally
+        :func:`~transmissionlines.calculations.pieces.weather_points` of a line.
     years : int or iterable of int
         Calendar years; WTK CONUS covers 2007–2014.
     cache_dir : path, optional
@@ -152,8 +154,9 @@ def fetch_weather(
 
     Returns
     -------
-    dict of (longitude, latitude) to DataFrame
-        One table per WTK cell used, keyed by the cell center, ready for
+    (wind, sun) : two dicts of (longitude, latitude) to DataFrame
+        WTK tables (air temperature, wind, pressure, humidity) and NSRDB tables
+        (``ghi_w_m2``), each keyed by cell center. Pass both to
         :func:`~transmissionlines.calculations.line_rating.thermal_rating`.
     """
     cache = Path(cache_dir) if cache_dir is not None else default_cache_dir()
@@ -163,31 +166,34 @@ def fetch_weather(
         raise ValueError("need at least one point and one year")
 
     wtk_grid = _grid("wtk", wtk_path, years[0], cache)
-    cells = np.unique(_nearest(wtk_grid, wanted, "WTK"))
-    centers = wtk_grid[cells][:, ::-1].astype(float)
-    sunlit = _nearest(_grid("nsrdb", nsrdb_path, years[0], cache), centers, "NSRDB")
+    sun_grid = _grid("nsrdb", nsrdb_path, years[0], cache)
+    wtk_cells = np.unique(_nearest(wtk_grid, wanted, "WTK"))
+    sun_cells = np.unique(_nearest(sun_grid, wanted, "NSRDB"))
 
-    tables: dict[int, list[pd.DataFrame]] = {int(cell): [] for cell in cells}
+    wind_years: dict[int, list[pd.DataFrame]] = {int(cell): [] for cell in wtk_cells}
+    sun_years: dict[int, list[pd.DataFrame]] = {int(cell): [] for cell in sun_cells}
     for year in years:
-        wind = _cells("wtk", wtk_path, [dataset for dataset, _, _ in _WTK.values()], cells, year, cache)
-        sun = _cells("nsrdb", nsrdb_path, ["ghi"], sunlit, year, cache)
-        for cell, sun_cell in zip(cells, sunlit):
-            raw = wind[int(cell)]
-            ghi = sun[int(sun_cell)]["ghi"].iloc[::2]  # NSRDB is half-hourly; keep the hours
-            if not ghi.index.equals(raw.index):
-                raise ValueError(f"WTK and NSRDB hours differ in {year}")
+        wind = _cells("wtk", wtk_path, [dataset for dataset, _, _ in _WTK.values()], wtk_cells, year, cache)
+        sun = _cells("nsrdb", nsrdb_path, ["ghi"], sun_cells, year, cache)
+        hours = next(iter(wind.values())).index
+        for cell, raw in wind.items():
             table = pd.DataFrame(
                 {column: raw[dataset] * scale + offset for column, (dataset, scale, offset) in _WTK.items()},
                 index=raw.index,
             )
             # WRF humidity can overshoot saturation slightly.
             table["relative_humidity"] = table["relative_humidity"].clip(0, 1)
-            table["ghi_w_m2"] = ghi.astype(float)
-            tables[int(cell)].append(table)
-    return {
-        (float(lon), float(lat)): pd.concat(tables[int(cell)])
-        for cell, (lon, lat) in zip(cells, centers)
-    }
+            wind_years[cell].append(table)
+        for cell, raw in sun.items():
+            ghi = raw["ghi"].iloc[::2].astype(float)  # NSRDB is half-hourly; keep the hours
+            if not ghi.index.equals(hours):
+                raise ValueError(f"WTK and NSRDB hours differ in {year}")
+            sun_years[cell].append(ghi.to_frame("ghi_w_m2"))
+
+    def keyed(grid: np.ndarray, by_cell: dict[int, list[pd.DataFrame]]) -> dict[tuple[float, float], pd.DataFrame]:
+        return {(float(grid[cell, 1]), float(grid[cell, 0])): pd.concat(frames) for cell, frames in by_cell.items()}
+
+    return keyed(wtk_grid, wind_years), keyed(sun_grid, sun_years)
 
 
 __all__ = ["NSRDB_PATH", "WTK_PATH", "default_cache_dir", "fetch_weather"]

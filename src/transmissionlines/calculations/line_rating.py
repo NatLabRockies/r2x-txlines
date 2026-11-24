@@ -1,11 +1,14 @@
 """Hourly thermal rating of a whole line: each piece rated in its own weather.
 
-Every piece of the route takes the weather at the location nearest its midpoint,
-and the wind angle between that weather's wind direction and the piece's true
-bearing. A circuit's rating each hour is the lowest over its pieces.
+Weather comes from one or more sources, each a mapping of locations to tables
+(e.g. WTK wind and temperature on one grid, NSRDB sunlight on another). The route is
+cut wherever the nearest location of any source changes, so each piece lies in one
+cell of every source. A piece takes the wind angle between its weather's wind
+direction and its true bearing, and a circuit's rating each hour is the lowest over
+its pieces.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -18,6 +21,8 @@ from transmissionlines.models.routing import LineSpan, RouteGeometry
 from transmissionlines.models.thermal import ThermalRatingResult
 
 WIND_DIRECTION_COLUMN = "wind_direction_deg"
+Location = tuple[float, float]
+WeatherSource = Mapping[Location, pd.DataFrame]
 
 
 def _span_circuits(span: LineSpan) -> dict[str, CircuitConfiguration]:
@@ -33,9 +38,18 @@ def _span_circuits(span: LineSpan) -> dict[str, CircuitConfiguration]:
     return start
 
 
+def _nearest(points: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Return the index of the grid location nearest each (longitude, latitude) point."""
+    # ponytail: dense points × locations distances; use a KD-tree if sources get large.
+    _, _, distance = WGS84.inv(
+        *np.broadcast_arrays(points[:, None, 0], points[:, None, 1], grid[None, :, 0], grid[None, :, 1])
+    )
+    return np.asarray(distance).argmin(axis=1)
+
+
 def thermal_rating(
     line: RoutedTransmissionLine | CrossSectionTransmissionLine,
-    weather: Mapping[tuple[float, float], pd.DataFrame],
+    weather: WeatherSource | Sequence[WeatherSource],
     *,
     route: RouteGeometry | None = None,
     conductor_temperature_c: float = 75.0,
@@ -48,24 +62,44 @@ def thermal_rating(
     ----------
     line : RoutedTransmissionLine or CrossSectionTransmissionLine
         A line with spans, or a representative cross-section plus ``route``.
-    weather : mapping of (longitude, latitude) to DataFrame
-        Weather tables sharing one UTC index, with the columns
+    weather : mapping, or sequence of mappings, of (longitude, latitude) to DataFrame
+        Weather tables sharing one UTC index. Together, the sources give the columns
         :func:`~transmissionlines.calculations.thermal.validate_weather` checks and
-        ``wind_direction_deg`` (where the wind blows from, clockwise from true north).
+        ``wind_direction_deg`` (where the wind blows from, clockwise from true north),
+        each column from exactly one source. Each source should have a location in
+        every cell the route crosses, e.g. by fetching at
+        :func:`~transmissionlines.calculations.pieces.weather_points`.
     route : RouteGeometry, optional
         The route of a cross-section line, e.g. from HIFLD. Not allowed with spans.
     conductor_temperature_c, emissivity, absorptivity : float
         As in :func:`~transmissionlines.calculations.thermal.conductor_ampacity`.
     """
+    sources = [weather] if isinstance(weather, Mapping) else list(weather)
+    if not sources or not all(sources):
+        raise ValueError("weather is empty")
+    locations = [list(source) for source in sources]
+    grids = [np.array(keys, dtype=float) for keys in locations]
+    index = next(iter(sources[0].values())).index
+    for source in sources:
+        for location, table in source.items():
+            if not table.index.equals(index):
+                raise ValueError(f"weather at {location} has a different time index")
+    columns = [set(next(iter(source.values())).columns) for source in sources]
+    if shared := set.intersection(*columns) if len(columns) > 1 else set():
+        raise ValueError(f"weather columns {sorted(shared)} come from more than one source")
+
+    def cells(points: np.ndarray) -> np.ndarray:
+        return np.column_stack([_nearest(points, grid) for grid in grids])
+
     if isinstance(line, RoutedTransmissionLine):
         if route is not None:
             raise ValueError("a routed line takes its route from its spans")
-        route_pieces = pieces(line)
+        route_pieces = pieces(line, cells=cells)
         circuits = [_span_circuits(piece.span) for piece in route_pieces if piece.span is not None]
     else:
         if route is None:
             raise ValueError("a cross-section line needs a route")
-        route_pieces = pieces(route)
+        route_pieces = pieces(route, cells=cells)
         by_id = {circuit.circuit_id: circuit for circuit in line.configuration.circuits}
         circuits = [by_id] * len(route_pieces)
     if not route_pieces:
@@ -74,39 +108,31 @@ def thermal_rating(
     if any(list(by_piece) != circuit_ids for by_piece in circuits):
         raise ValueError("every span must carry the same circuits")
 
-    if not weather:
-        raise ValueError("weather is empty")
-    locations = list(weather)
-    tables = [validate_weather(weather[location]) for location in locations]
-    index = tables[0].index
-    for location, table in zip(locations, tables):
-        if not table.index.equals(index):
-            raise ValueError(f"weather at {location} has a different time index")
-        if WIND_DIRECTION_COLUMN not in table or not np.isfinite(table[WIND_DIRECTION_COLUMN].to_numpy(float)).all():
-            raise ValueError(f"weather at {location} needs finite {WIND_DIRECTION_COLUMN}")
-
-    # ponytail: dense pieces × locations distance matrix; use a KD-tree if grids get large.
-    midpoints = np.array([piece.midpoint for piece in route_pieces])
-    grid = np.array(locations, dtype=float)
-    _, _, distance = WGS84.inv(
-        *np.broadcast_arrays(midpoints[:, None, 0], midpoints[:, None, 1], grid[None, :, 0], grid[None, :, 1])
-    )
-    nearest = np.asarray(distance).argmin(axis=1)
+    labels = [tuple(int(i) for i in row) for row in cells(np.array([piece.midpoint for piece in route_pieces]))]
     bearings = np.array([piece.bearing_deg for piece in route_pieces])
+    tables: dict[tuple[int, ...], pd.DataFrame] = {}
+
+    def table_for(label: tuple[int, ...]) -> pd.DataFrame:
+        if label not in tables:
+            table = pd.concat([sources[s][locations[s][i]] for s, i in enumerate(label)], axis=1)
+            if WIND_DIRECTION_COLUMN not in table or not np.isfinite(table[WIND_DIRECTION_COLUMN].to_numpy(float)).all():
+                raise ValueError(f"weather needs finite {WIND_DIRECTION_COLUMN}")
+            tables[label] = validate_weather(table)
+        return tables[label]
 
     # Rate pieces in groups sharing weather and hardware, keeping a running minimum
     # so memory stays one group × hours rather than pieces × hours.
-    groups: dict[tuple[str, int, object, int], list[int]] = {}
-    for position, (location, by_piece) in enumerate(zip(nearest, circuits)):
+    groups: dict[tuple[str, tuple[int, ...], object, int], list[int]] = {}
+    for position, (label, by_piece) in enumerate(zip(labels, circuits)):
         for circuit_id, circuit in by_piece.items():
-            key = (circuit_id, int(location), circuit.conductor_spec.uuid, circuit.bundle_spec.subconductor_count)
+            key = (circuit_id, label, circuit.conductor_spec.uuid, circuit.bundle_spec.subconductor_count)
             groups.setdefault(key, []).append(position)
 
     amps = {circuit_id: np.full(len(index), np.inf) for circuit_id in circuit_ids}
     limiting = {circuit_id: np.zeros(len(index), dtype=int) for circuit_id in circuit_ids}
-    for (circuit_id, location, _, _), positions in groups.items():
+    for (circuit_id, label, _, _), positions in groups.items():
         circuit = circuits[positions[0]][circuit_id]
-        table = tables[location]
+        table = table_for(label)
         members = np.array(positions)
         rated = circuit.bundle_spec.subconductor_count * ampacity(
             **conductor_inputs(circuit.conductor_spec, conductor_temperature_c),
@@ -127,7 +153,9 @@ def thermal_rating(
         nominal_voltage_kv=line.nominal_voltage_kv,
         conductor_temperature_c=conductor_temperature_c,
         pieces=route_pieces,
-        weather_location=[tuple(locations[i]) for i in nearest],
+        weather_locations=[
+            tuple(tuple(locations[s][i]) for s, i in enumerate(label)) for label in labels
+        ],
         amps=pd.DataFrame(amps, index=index),
         limiting_piece=pd.DataFrame(limiting, index=index),
     )

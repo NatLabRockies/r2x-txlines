@@ -35,8 +35,12 @@ def _windy(rows: int = 3, **overrides) -> pd.DataFrame:
     return _weather(rows, **{"wind_direction_deg": 0.0, **overrides})
 
 
+def _limiting_bearings(result) -> np.ndarray:
+    return np.array([result.pieces[i].bearing_deg for i in result.limiting_piece["c1"]])
+
+
 def test_one_piece_matches_the_conductor_rating_at_its_wind_angle() -> None:
-    route = RouteGeometry(coordinates=[(0, 0), (0.1, 0.1)])
+    route = RouteGeometry(coordinates=[(0, 0), (0.005, 0.005)])
     (piece,) = pieces(route)
     weather = _windy(wind_direction_deg=[0.0, 90.0, 200.0])
     result = thermal_rating(_cross_section(), {(0, 0): weather}, route=route)
@@ -50,25 +54,47 @@ def test_one_piece_matches_the_conductor_rating_at_its_wind_angle() -> None:
 def test_piece_running_along_the_wind_limits_the_line() -> None:
     # A north wind crosses the east-running piece and runs along the north-running one.
     result = thermal_rating(_cross_section(), {(0, 0): _windy()}, route=_ELBOW)
-    assert (result.limiting_piece["c1"] == 1).all()
-    assert result.weather_location == [(0, 0), (0, 0)]
+    np.testing.assert_allclose(_limiting_bearings(result), 0, atol=1e-6)
+    assert set(result.weather_locations) == {((0, 0),)}
+    assert len(result.pieces) == 2  # one weather cell: no cuts beyond the bend
 
 
 def test_each_piece_takes_its_nearest_weather() -> None:
-    hot, cool = _windy(wind_direction_deg=45.0, air_temperature_k=313.15), _windy(wind_direction_deg=45.0)
-    near_start, near_end = (0.05, 0), (0.1, 0.05)
-    result = thermal_rating(_cross_section(), {near_start: cool, near_end: hot}, route=_ELBOW)
-    assert result.weather_location == [near_start, near_end]
+    east = RouteGeometry(coordinates=[(0, 0), (0.1, 0)])
+    west_cell, east_cell = (0.02, 0.01), (0.08, 0.01)
+    hot, cool = _windy(air_temperature_k=313.15), _windy()
+    result = thermal_rating(_cross_section(), {west_cell: cool, east_cell: hot}, route=east)
     assert (result.limiting_piece["c1"] == 1).all()
-    swapped = thermal_rating(_cross_section(), {near_start: hot, near_end: cool}, route=_ELBOW)
+    swapped = thermal_rating(_cross_section(), {west_cell: hot, east_cell: cool}, route=east)
     assert (swapped.limiting_piece["c1"] == 0).all()
-    np.testing.assert_allclose(swapped.amps, result.amps)  # 45° wind meets both pieces alike
+    np.testing.assert_allclose(swapped.amps, result.amps)
+
+
+def test_route_is_cut_where_the_nearest_weather_changes() -> None:
+    east = RouteGeometry(coordinates=[(0, 0), (0.1, 0)])
+    west_cell, east_cell = (0.02, 0.01), (0.08, 0.01)
+    result = thermal_rating(_cross_section(), {west_cell: _windy(), east_cell: _windy()}, route=east)
+    assert [loc for (loc,) in result.weather_locations] == [west_cell, east_cell]
+    assert abs(result.pieces[0].end[0] - 0.05) * 111_320 < 50
+
+
+def test_each_source_is_looked_up_separately() -> None:
+    # Wind from one cell, sunlight from two: the sunnier half limits the line.
+    east = RouteGeometry(coordinates=[(0, 0), (0.1, 0)])
+    wind = {(0.05, 0): _windy().drop(columns="ghi_w_m2")}
+    shade, sun = _weather()[["ghi_w_m2"]] * 0, _weather()[["ghi_w_m2"]]
+    result = thermal_rating(_cross_section(), [wind, {(0.02, 0): shade, (0.08, 0): sun}], route=east)
+    assert len(result.pieces) == 2
+    assert (result.limiting_piece["c1"] == 1).all()
+    assert result.weather_locations[1] == ((0.05, 0), (0.08, 0))
+    with pytest.raises(ValueError, match="more than one source"):
+        thermal_rating(_cross_section(), [{(0, 0): _windy()}, {(0, 0): sun}], route=east)
 
 
 def test_routed_line_uses_its_spans_and_reports_mva() -> None:
     line, _, _ = _routed_line(configuration=_rated_configuration())
     result = thermal_rating(line, {(-107.5, 45): _windy()})
-    assert [piece.span for piece in result.pieces] == line.spans
+    assert all(piece.span is line.spans[0] for piece in result.pieces)
     np.testing.assert_allclose(result.mva, result.amps * math.sqrt(3) * 230 / 1000)
 
 

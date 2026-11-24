@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from transmissionlines.calculations.line_rating import thermal_rating
-from transmissionlines.calculations.pieces import pieces
+from transmissionlines.calculations.pieces import weather_points
 from transmissionlines.models.routing import RouteGeometry
 from transmissionlines.weather import fetch_weather
 
@@ -49,16 +49,19 @@ def _fetch(tmp_path: Path, points, **kwargs) -> dict:
 
 
 def test_weather_comes_in_si_units_from_the_nearest_cell(tmp_path: Path) -> None:
-    weather = _fetch(tmp_path, [(-104.961, 40.041), (-104.959, 40.039)])
-    ((lon, lat), table), = weather.items()  # both points share one cell
+    wind, sun = _fetch(tmp_path, [(-104.961, 40.041), (-104.959, 40.039)])
+    ((lon, lat), table), = wind.items()  # both points share one cell
+    ((sun_lon, sun_lat), sunlight), = sun.items()
     assert (lon, lat) == pytest.approx((-104.96, 40.04))
+    assert (sun_lon, sun_lat) == pytest.approx((-104.96, 40.04))
     cell = int(np.flatnonzero(np.isclose(WTK_LAT.ravel(), 40.04) & np.isclose(WTK_LON.ravel(), -104.96))[0])
     assert table["air_temperature_k"].iloc[0] == pytest.approx(293.15 + cell / 100)
     assert table["pressure_pa"].iloc[0] == pytest.approx(84_000)
     assert table["wind_speed_m_s"].iloc[0] == pytest.approx(3.5)
     assert table["wind_direction_deg"].iloc[3] == pytest.approx(3)
     assert (table["relative_humidity"] == 1).all()
-    np.testing.assert_allclose(table["ghi_w_m2"], 100 * np.arange(HOURS))
+    np.testing.assert_allclose(sunlight["ghi_w_m2"], 100 * np.arange(HOURS))
+    assert sunlight.index.equals(table.index)
     assert str(table.index.tz) == "UTC" and len(table) == HOURS
 
 
@@ -70,8 +73,9 @@ def test_second_fetch_reads_only_the_cache(tmp_path: Path) -> None:
         [(-104.95, 40.05)], 2012, cache_dir=tmp_path / "cache",
         wtk_path=str(tmp_path / "wtk_{year}.h5"), nsrdb_path=str(tmp_path / "nsrdb_{year}.h5"),
     )
-    for key in first:
-        pd.testing.assert_frame_equal(again[key], first[key])
+    for before, after in zip(first, again):
+        for key in before:
+            pd.testing.assert_frame_equal(after[key], before[key])
 
 
 def test_points_off_the_grid_are_rejected(tmp_path: Path) -> None:
@@ -81,7 +85,9 @@ def test_points_off_the_grid_are_rejected(tmp_path: Path) -> None:
 
 def test_route_goes_to_a_rating_with_no_manual_steps(tmp_path: Path) -> None:
     route = RouteGeometry(coordinates=[(-104.99, 40.01), (-104.91, 40.01), (-104.91, 40.15)])
-    weather = _fetch(tmp_path, [piece.midpoint for piece in pieces(route)])
-    result = thermal_rating(_cross_section(), weather, route=route)
-    assert len(weather) == 2
+    wind, sun = _fetch(tmp_path, weather_points(route))
+    result = thermal_rating(_cross_section(), (wind, sun), route=route)
+    used = {locations for locations in result.weather_locations}
+    assert {w for w, _ in used} == set(wind) and {s for _, s in used} == set(sun)
+    assert len(result.pieces) == len(used) + 1  # one piece per cell pair, plus the bend
     assert (result.amps["c1"] > 0).all()

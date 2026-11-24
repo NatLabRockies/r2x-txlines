@@ -34,7 +34,7 @@ class ThermalRatingResult(CalculationResultModel):
     ``amps`` and ``limiting_piece`` share a UTC index and have one column per
     circuit. ``amps`` is the whole bundle's rating. ``limiting_piece`` gives the
     position in ``pieces`` of the piece that set each hour's rating, and
-    ``weather_location`` the weather key each piece used.
+    ``weather_locations`` the location each piece used from each weather source.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
@@ -43,7 +43,7 @@ class ThermalRatingResult(CalculationResultModel):
     nominal_voltage_kv: float
     conductor_temperature_c: float
     pieces: list[Piece]
-    weather_location: list[tuple[float, float]]
+    weather_locations: list[tuple[tuple[float, float], ...]]
     amps: pd.DataFrame
     limiting_piece: pd.DataFrame
 

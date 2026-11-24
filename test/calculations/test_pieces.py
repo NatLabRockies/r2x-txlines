@@ -1,14 +1,19 @@
+import math
+
+import numpy as np
 import pytest
 from pyproj import Geod
 
-from transmissionlines.calculations.pieces import pieces
+from transmissionlines.calculations.pieces import CELL_SAMPLE_M, MAX_PIECE_LENGTH_M, pieces, weather_points
 from transmissionlines.models.routing import RouteGeometry
 
 from test.integration.test_calculation_input_graph import _routed_line
 
 
 def test_bearings_are_true_azimuths() -> None:
-    north, east, south, west = pieces(RouteGeometry(coordinates=[(0, 0), (0, 1), (1, 1), (1, 0), (0, 0)]))
+    north, east, south, west = pieces(
+        RouteGeometry(coordinates=[(0, 0), (0, 1), (1, 1), (1, 0), (0, 0)]), max_length_m=math.inf,
+    )
     assert north.bearing_deg == pytest.approx(0, abs=1e-9)
     assert east.bearing_deg == pytest.approx(90, abs=1e-3)
     assert south.bearing_deg == pytest.approx(180, abs=1e-9)
@@ -18,18 +23,18 @@ def test_bearings_are_true_azimuths() -> None:
 def test_bearing_is_taken_at_the_midpoint() -> None:
     # Due east along 60°N, the geodesic starts north of east and ends south of it;
     # by symmetry it runs exactly east at its midpoint.
-    (piece,) = pieces(RouteGeometry(coordinates=[(0, 60), (10, 60)]))
+    (piece,) = pieces(RouteGeometry(coordinates=[(0, 60), (10, 60)]), max_length_m=math.inf)
     assert piece.bearing_deg == pytest.approx(90, abs=1e-9)
     assert piece.midpoint[0] == pytest.approx(5)
 
 
 def test_length_is_the_wgs84_geodesic() -> None:
-    (piece,) = pieces(RouteGeometry(coordinates=[(0, 0), (0, 1)]))
+    (piece,) = pieces(RouteGeometry(coordinates=[(0, 0), (0, 1)]), max_length_m=math.inf)
     assert piece.length_m == pytest.approx(110_574.389, abs=0.01)  # one degree of meridian at the equator
 
 
 def test_repeated_vertices_are_dropped() -> None:
-    route = pieces(RouteGeometry(coordinates=[(0, 0), (0, 0), (0, 1)]))
+    route = pieces(RouteGeometry(coordinates=[(0, 0), (0, 0), (0, 1)]), max_length_m=math.inf)
     assert len(route) == 1
 
 
@@ -40,8 +45,39 @@ def test_span_pieces_cover_the_line_and_keep_their_span() -> None:
     line = line.model_copy(update={"spans": [bent]})
 
     route = pieces(line)
-    assert [piece.span for piece in route] == [bent, bent]
-    assert route[0].end == route[1].start
+    assert all(piece.span is bent for piece in route)
+    assert all(before.end == after.start for before, after in zip(route, route[1:]))
     lons, lats = zip(*bent.route_geometry.coordinates)
     assert sum(piece.length_m for piece in route) == pytest.approx(Geod(ellps="WGS84").line_length(lons, lats))
     assert all(piece.span is None for piece in pieces(bent.route_geometry))
+
+
+def test_long_stretches_split_into_equal_pieces_along_the_geodesic() -> None:
+    route = RouteGeometry(coordinates=[(0, 60), (0.1, 60), (0.1, 60.001)])
+    whole = pieces(route, max_length_m=math.inf)
+    split = pieces(route)
+    assert len(split) == math.ceil(whole[0].length_m / MAX_PIECE_LENGTH_M) + 1
+    assert max(piece.length_m for piece in split) <= MAX_PIECE_LENGTH_M
+    assert sum(piece.length_m for piece in split) == pytest.approx(sum(piece.length_m for piece in whole))
+    # Heading east, the geodesic starts north of east and ends south of it.
+    east = [piece.bearing_deg for piece in split[:-1]]
+    assert east == sorted(east)
+    assert east[0] < 90 < east[-1]
+
+
+def test_cells_cut_stretches_only_where_the_cell_changes() -> None:
+    route = RouteGeometry(coordinates=[(0, 0), (0.1, 0), (0.1, 0.02)])
+    route_pieces = pieces(route, cells=lambda points: (points[:, :1] > 0.05).astype(int))
+    # East of 0.05° is one cell: the east stretch splits once, the north stretch not at all.
+    assert len(route_pieces) == 3
+    assert abs(route_pieces[0].end[0] - 0.05) * 111_320 < CELL_SAMPLE_M
+    assert sum(piece.length_m for piece in route_pieces) == pytest.approx(
+        sum(piece.length_m for piece in pieces(route, max_length_m=math.inf))
+    )
+
+
+def test_weather_points_sample_the_route_every_cell_step() -> None:
+    route = RouteGeometry(coordinates=[(0, 0), (0.01, 0)])
+    points = np.array(weather_points(route))
+    assert len(points) == math.ceil(1113.2 / CELL_SAMPLE_M)
+    assert np.diff(points[:, 0]).max() * 111_320 <= CELL_SAMPLE_M + 1e-6
