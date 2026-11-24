@@ -156,7 +156,7 @@ def validate_weather(weather: pd.DataFrame) -> pd.DataFrame:
             raise ValueError(f"{column} outside {low}–{high}; check units")
     if (weather["wind_speed_m_s"] < 0).any() or (weather["ghi_w_m2"] < 0).any():
         raise ValueError("wind_speed_m_s and ghi_w_m2 must be nonnegative")
-    if HUMIDITY_COLUMN in weather and not weather[HUMIDITY_COLUMN].between(0, 1).all():
+    if HUMIDITY_COLUMN in weather and not weather[HUMIDITY_COLUMN].astype(float).between(0, 1).all():
         raise ValueError(f"{HUMIDITY_COLUMN} must be a fraction between 0 and 1, not a percentage")
     return weather
 
@@ -166,7 +166,7 @@ def conductor_ampacity(
     bundle: BundleSpec,
     weather: pd.DataFrame,
     *,
-    wind_angle_deg: float | pd.Series,
+    wind_angle_deg: float | np.ndarray,
     conductor_temperature_c: float = 75.0,
     emissivity: float = 0.8,
     absorptivity: float = 0.8,
@@ -177,6 +177,8 @@ def conductor_ampacity(
     Emissivity and absorptivity default to DynamicLineRatings' 0.8. Without a
     ``relative_humidity`` column, humidity is 0.5.
     """
+    if not (0 <= emissivity <= 1 and 0 <= absorptivity <= 1):
+        raise ValueError("emissivity and absorptivity must be fractions between 0 and 1")
     weather = validate_weather(weather)
     equipment = conductor.equipment
     if equipment.diameter_in is None:

@@ -173,3 +173,15 @@ def test_weather_needs_its_columns_and_a_utc_index() -> None:
         conductor_ampacity(_conductor(), bundle, _weather().drop(columns="ghi_w_m2"), wind_angle_deg=90)
     with pytest.raises(ValueError, match="UTC"):
         conductor_ampacity(_conductor(), bundle, _weather().tz_convert("US/Mountain"), wind_angle_deg=90)
+
+
+def test_missing_nullable_humidity_is_rejected() -> None:
+    humidity = pd.array([0.5, pd.NA, 0.5], dtype="Float64")
+    with pytest.raises(ValueError, match="not a percentage"):
+        conductor_ampacity(_conductor(), BundleSpec(subconductor_count=1), _weather(relative_humidity=humidity), wind_angle_deg=90)
+
+
+@pytest.mark.parametrize("surface", [{"emissivity": 80.0}, {"absorptivity": -0.1}, {"emissivity": float("nan")}])
+def test_surface_coefficients_must_be_fractions(surface: dict) -> None:
+    with pytest.raises(ValueError, match="fractions"):
+        conductor_ampacity(_conductor(), BundleSpec(subconductor_count=1), _weather(), wind_angle_deg=90, **surface)
