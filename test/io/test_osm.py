@@ -1,3 +1,5 @@
+from xml.sax.saxutils import quoteattr
+
 import pytest
 
 pytest.importorskip("osmium")
@@ -21,7 +23,7 @@ _NODES = {
     1: (-77.000, 38.0), 2: (-76.99, 38.0), 3: (-76.98, 38.0), 4: (-76.97, 38.0), 5: (-76.96, 38.0),
     40: (-77.001, 37.999), 41: (-76.9995, 37.999), 42: (-76.9995, 38.001), 43: (-77.001, 38.001),
     30: (-76.961, 37.999), 31: (-76.959, 37.999), 32: (-76.959, 38.001), 33: (-76.961, 38.001),
-    6: (-76.98, 38.01), 7: (-76.98, 38.02),
+    6: (-76.97, 38.01), 7: (-76.98, 38.02), 8: (-76.975, 38.0005), 9: (-76.975, 37.9995),
 }
 _TOWER = {"power": "tower", "structure": "lattice", "line_attachment": "suspension"}
 _NODE_TAGS = {2: _TOWER, 3: {"power": "tower", "line_attachment": "anchor"}, 4: _TOWER}
@@ -29,7 +31,7 @@ _LINE = {"power": "line", "voltage": "230000", "circuits": "1", "wires": "double
 
 
 def _tags(tags: dict[str, str]) -> str:
-    return "".join(f'<tag k="{k}" v="{v}"/>' for k, v in tags.items())
+    return "".join(f'<tag k="{k}" v={quoteattr(v)}/>' for k, v in tags.items())
 
 
 def _way(way_id: int, nodes: list[int], tags: dict[str, str]) -> tuple[int, str]:
@@ -37,13 +39,13 @@ def _way(way_id: int, nodes: list[int], tags: dict[str, str]) -> tuple[int, str]
     return way_id, f'<way id="{way_id}" version="1">{refs}{_tags(tags)}</way>'
 
 
-def _osm(tmp_path, *ways: tuple[int, str]) -> str:
+def _osm(tmp_path, *ways: tuple[int, str], alpha: dict[str, str] | None = None) -> str:
     nodes = "".join(
         f'<node id="{i}" version="1" lon="{lon}" lat="{lat}">{_tags(_NODE_TAGS.get(i, {}))}</node>'
         for i, (lon, lat) in _NODES.items()
     )
     substations = (
-        _way(50, [40, 41, 42, 43, 40], {"power": "substation", "name": "Alpha"}),
+        _way(50, [40, 41, 42, 43, 40], {"power": "substation", "name": "Alpha", **(alpha or {})}),
         _way(20, [30, 31, 32], {}), _way(21, [32, 33, 30], {}),
     )
     all_ways = "".join(xml for _, xml in sorted((*substations, *ways)))  # OSM files are sorted by ID
@@ -85,7 +87,7 @@ def test_shared_structure_gives_one_circuit_per_voltage(tmp_path) -> None:
 
     assert circuits.keys() == {230, 115}
     assert (circuits[230].subconductor_count, circuits[115].subconductor_count) == (2, 1)
-    assert circuits[115].circuits == 1 and circuits[115].provenance["circuits"] == "osm:cables"
+    assert circuits[115].circuits == 1 and circuits[115].provenance["circuits"] == "osm:circuits"
     assert circuits[230].towers == circuits[115].towers
 
 
@@ -172,3 +174,81 @@ def test_two_circuits_at_one_voltage_are_one_record(tmp_path) -> None:
     (circuit,) = assemble_circuits(read_power(path))
 
     assert (circuit.voltage_kv, circuit.circuits, circuit.subconductor_count) == (69, 2, 1)
+
+
+def test_single_phase_ways_fold_into_their_circuit(tmp_path) -> None:
+    phase = {**_LINE, "cables": "1", "circuits": "1/3"}
+    path = _osm(
+        tmp_path, _way(10, [1, 2, 3], _LINE), _way(11, [3, 8, 4], phase), _way(12, [3, 4], phase),
+        _way(13, [3, 9, 4], phase), _way(14, [4, 5], _LINE),
+    )
+
+    (circuit,) = assemble_circuits(read_power(path))
+
+    assert (circuit.from_bus.name, circuit.to_bus.name) == ("Alpha", "Bravo")
+    assert circuit.way_ids == (10, 11, 14) and circuit.circuits == 1  # 11 is the middle-length phase
+
+
+def test_double_circuit_splitting_and_rejoining_stays_one_record(tmp_path) -> None:
+    double = {**_LINE, "cables": "6", "circuits": "2", "name": "X"}
+    single = {**_LINE, "cables": "3", "circuits": "1", "name": "X"}
+    path = _osm(
+        tmp_path, _way(10, [1, 2, 3], double), _way(11, [3, 8, 4], single), _way(12, [3, 9, 4], single),
+        _way(13, [4, 5], double),
+    )
+
+    (circuit,) = assemble_circuits(read_power(path))
+
+    assert (circuit.from_bus.name, circuit.to_bus.name, circuit.circuits) == ("Alpha", "Bravo", 2)
+
+
+def test_double_circuit_splitting_into_named_circuits_follows_names(tmp_path) -> None:
+    path = _osm(
+        tmp_path, _way(10, [1, 2, 3], {**_LINE, "cables": "6", "circuits": "2", "name": "A & B"}),
+        _way(11, [3, 6, 7], {**_LINE, "name": "B"}), _way(12, [3, 4, 5], {**_LINE, "name": "A"}),
+    )
+
+    circuits = {c.way_ids: c for c in assemble_circuits(read_power(path))}
+
+    assert circuits.keys() == {(10, 12), (10, 11)}
+    assert circuits[(10, 12)].to_bus.name == "Bravo" and circuits[(10, 11)].to_bus is None
+    assert len({c.circuit_id for c in circuits.values()}) == 2
+
+
+def test_repeated_voltage_with_one_total_counts_both_circuits(tmp_path) -> None:
+    path = _osm(tmp_path, _way(10, [1, 2, 3, 4, 5], {**_LINE, "voltage": "230000;230000", "circuits": "2"}))
+
+    (circuit,) = assemble_circuits(read_power(path))
+
+    assert circuit.circuits == 2 and circuit.provenance["circuits"] == "osm:circuits"
+
+
+@pytest.mark.parametrize(("alpha", "reach_m", "reached"), [
+    ({}, 1000, True),  # no voltage tag: accepted
+    ({"voltage": "230000;69000"}, 1000, True),
+    ({"voltage": "115000"}, 1000, False),  # does not carry the line's voltage
+    ({}, 500, False),  # beyond reach
+])
+def test_dead_end_snaps_to_a_nearby_substation_with_its_voltage(tmp_path, alpha, reach_m, reached) -> None:
+    # Node 2, the line's dead end, is ~830 m east of substation Alpha's fence.
+    path = _osm(tmp_path, _way(10, [2, 3, 4, 5], _LINE), alpha=alpha)
+
+    (circuit,) = assemble_circuits(read_power(path), dead_end_reach_m=reach_m)
+
+    assert (circuit.from_bus is not None) == reached
+    if reached:
+        assert circuit.from_bus.name == "Alpha" and 700 < circuit.from_bus.distance_m < 900
+    assert circuit.to_bus.distance_m == 0  # node 5 is inside Bravo
+
+
+def test_junction_near_a_substation_is_not_its_end(tmp_path) -> None:
+    # Junction 2 is a tap within reach of Alpha, but not a dead end, so circuits end there.
+    path = _osm(tmp_path, _way(10, [2, 3, 4, 5], _LINE), _way(11, [2, 6], _LINE), _way(12, [7, 2], _LINE))
+
+    circuits = assemble_circuits(read_power(path), dead_end_reach_m=1000)
+
+    ends_at_junction = [
+        bus for c in circuits for bus, end in ((c.from_bus, c.route[0]), (c.to_bus, c.route[-1]))
+        if end == _NODES[2]
+    ]
+    assert len(ends_at_junction) == 3 and ends_at_junction == [None, None, None]

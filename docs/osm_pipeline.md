@@ -5,13 +5,22 @@ sag and St. Clair calculations can run on.
 
 Status: stages 1, 2 and 4 built in `transmissionlines.io.osm`: `read_power` and
 `assemble_circuits` (need the `osm` extra), `line_from_circuit` and `route_geometry` (don't).
-`line_from_circuit(record, configuration)` returns a `RoutedTransmissionLine` when both ends
-reach substations and towers are mapped, else a `CrossSectionTransmissionLine` to rate along
-`route_geometry(record)`. Each substation gets one bus location, and routes are extended to it,
-so lines meeting there share a bus. Not yet: the stage 3 defaults table (the `configuration`
-is passed in), elevation, per-phase folding at junctions, `route=power` relations, area
-boundaries for identifying ties, the GeoParquet cache.
-Delaware (≥69 kV): 523 circuits, all build and register in one system; 122 routed.
+`assemble_circuits` folds single-phase ways back into their circuit, follows each circuit
+through junctions by circuit count and direction (pairing by name), and merges circuits that
+share most of their length. `line_from_circuit(record, configuration)` returns a
+`RoutedTransmissionLine` when both ends reach substations and towers are mapped, else a
+`CrossSectionTransmissionLine` to rate along `route_geometry(record)`; lines meeting at a
+substation share one bus. Not yet: the stage 3 defaults table (the `configuration` is passed
+in), elevation, closing small mapping gaps, `route=power` relations, area boundaries for
+identifying ties, the GeoParquet cache.
+A dead end (no other way of its voltage continues) snaps to the nearest substation carrying
+its voltage within `dead_end_reach_m` (400 m), recording `BusRecord.distance_m`; junctions keep
+the strict 50 m. Calibrated on DE+MD+NJ+PA (1,416 dead ends ≥69 kV): ends cluster within
+~300 m of a substation, then thin to a flat background, and closer wrong-voltage substations
+appear past ~400 m (10–20% of ends vs ≤5% within). Line names agree with the snapped
+substation 19 times vs 2 disagreements within 400 m at ≥220 kV.
+≥220 kV results (share of line length in substation-to-substation circuits): Delaware alone
+53% → 64% with snapping; Delaware's lines read with its neighbours 98%; all four states 84%.
 Scope per the PI: mainly lines above 220 kV, inter-area and possibly intra-area.
 
 ```

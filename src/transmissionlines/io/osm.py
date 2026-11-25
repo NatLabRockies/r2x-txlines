@@ -12,8 +12,8 @@ Reading and assembling need the ``osm`` extra (``osmium``, ``shapely``); the rec
 """
 
 from collections import defaultdict
-from math import cos, radians
-from dataclasses import dataclass, field
+from math import asin, cos, hypot, radians, sin, sqrt
+from dataclasses import dataclass, field, replace
 from os import PathLike
 
 from transmissionlines.models.assets import CrossSectionTransmissionLine, RoutedTransmissionLine
@@ -76,6 +76,7 @@ class BusRecord:
     substation_ref: str
     name: str | None
     location: Coordinate  # one point inside the substation, shared by every line ending there
+    distance_m: float = 0.0  # from the circuit's end to the substation outline; review long ones
 
 
 @dataclass(frozen=True)
@@ -96,60 +97,91 @@ class CircuitRecord:
     provenance: dict[str, str]  # field -> where its value came from
 
 
-def read_power(path: str | PathLike[str]) -> OsmPower:
-    """Read power lines, supports and substations (ways and multipolygons) from an OSM file."""
+def read_power(*paths: str | PathLike[str]) -> OsmPower:
+    """Read power lines, supports and substations (ways and multipolygons) from OSM files.
+
+    Several files, such as neighbouring state extracts, are combined; objects crossing
+    their shared border appear in each and are kept once.
+    """
     import osmium
     from shapely import wkb
 
-    ways, supports, substations = [], {}, []
+    ways, supports, substations = {}, {}, {}
     factory = osmium.geom.WKBFactory()
-    processor = (
-        osmium.FileProcessor(path)
-        .with_locations()
-        .with_areas(osmium.filter.TagFilter(("power", "substation")))
-        .with_filter(osmium.filter.KeyFilter("power"))
-    )
-    for obj in processor:
-        tags = {tag.k: tag.v for tag in obj.tags}
-        power = tags.get("power")
-        if obj.is_node() and power in SUPPORT_POWER:
-            supports[obj.id] = Support(obj.id, (obj.location.lon, obj.location.lat), tags)
-        elif (obj.is_way() and power in LINE_POWER and tags.get("line") not in SUBSTATION_LINES
-              and all(n.location.valid() for n in obj.nodes)):
-            ways.append(PowerWay(
-                obj.id, tags, tuple(n.ref for n in obj.nodes), tuple((n.lon, n.lat) for n in obj.nodes),
-            ))
-        elif obj.is_area() and power == "substation":
-            ref = f"{'way' if obj.from_way() else 'relation'}/{obj.orig_id()}"
-            substations.append(Substation(ref, tags, wkb.loads(factory.create_multipolygon(obj), hex=True)))
-    return OsmPower(ways, supports, substations)
+    for path in paths:
+        processor = (
+            osmium.FileProcessor(path)
+            .with_locations()
+            .with_areas(osmium.filter.TagFilter(("power", "substation")))
+            .with_filter(osmium.filter.KeyFilter("power"))
+        )
+        for obj in processor:
+            tags = {tag.k: tag.v for tag in obj.tags}
+            power = tags.get("power")
+            if obj.is_node() and power in SUPPORT_POWER:
+                supports[obj.id] = Support(obj.id, (obj.location.lon, obj.location.lat), tags)
+            elif (obj.is_way() and power in LINE_POWER and tags.get("line") not in SUBSTATION_LINES
+                  and all(n.location.valid() for n in obj.nodes)):
+                ways[obj.id] = PowerWay(
+                    obj.id, tags, tuple(n.ref for n in obj.nodes), tuple((n.lon, n.lat) for n in obj.nodes),
+                )
+            elif obj.is_area() and power == "substation":
+                ref = f"{'way' if obj.from_way() else 'relation'}/{obj.orig_id()}"
+                substations[ref] = Substation(ref, tags, wkb.loads(factory.create_multipolygon(obj), hex=True))
+    return OsmPower(list(ways.values()), supports, list(substations.values()))
 
 
-def assemble_circuits(power: OsmPower, *, substation_tolerance_m: float = 50.0) -> list[CircuitRecord]:
-    """Join ways into one record per circuit and voltage.
+def assemble_circuits(
+    power: OsmPower, *, substation_tolerance_m: float = 50.0, dead_end_reach_m: float = 400.0,
+) -> list[CircuitRecord]:
+    """Join ways into one record per circuit route and voltage.
 
-    Ways carrying the same voltage are joined end to end, except at a node where other
-    than two such ways meet or at a substation. A node counts as at a substation when it
-    lies within ``substation_tolerance_m`` of its outline, since lines are often mapped
-    ending at a portal just outside the fence. A way tagged ``voltage=230000;115000``
-    contributes to one circuit at each voltage, which share its route and towers. Ways
-    without a ``voltage`` tag are skipped.
+    Per voltage:
+
+    1. Ways mapping single phases (``cables=1``, ``circuits=1/3``) that share both ends
+       are folded into one way carrying the whole circuit.
+    2. Each way carries as many circuits as its ``circuits`` (or ``cables`` / 3) tag says,
+       else one. Circuits are followed through each node: the ways meeting there are split
+       into two sides by direction, and when both sides carry as many circuits, each
+       circuit continues into one on the far side, preferring ways with matching names.
+       A double-circuit way splitting into two single-circuit ways passes both through;
+       a tap, where the circuit counts do not balance, ends every circuit there.
+    3. Circuits with the same two ends that share most of their ways become one record
+       whose ``circuits`` counts them.
+
+    Circuits end at substations: a node within ``substation_tolerance_m`` of an outline,
+    since lines are often mapped ending at a portal just outside the fence. A line does not
+    just stop, so a dead end (no other way of its voltage continues) further out ends at the
+    nearest substation within ``dead_end_reach_m`` that carries its voltage or has no
+    ``voltage`` tag; :attr:`BusRecord.distance_m` records how far. Junctions keep the strict
+    tolerance, so a split near a substation is not mistaken for its end. A way tagged
+    ``voltage=230000;115000`` contributes at each voltage. Ways without a ``voltage`` tag
+    are skipped.
     """
     # ponytail: joins only at way ends; a branch tapping mid-way stays its own circuit.
     from shapely import STRtree, Point
 
     tree = STRtree([s.area for s in power.substations])
-    in_substation: dict[int, Substation | None] = {}
+    in_substation: dict[int, tuple[Substation | None, float]] = {}
+
+    def nearest(coordinate: Coordinate, reach_m: float, accept=lambda station: True):
+        # ponytail: meters to degrees at the node's latitude; fine away from the poles.
+        degrees = reach_m / (111_320 * cos(radians(coordinate[1])))
+        found = [
+            (_meters_to(power.substations[i].area, coordinate), power.substations[i])
+            for i in tree.query(Point(coordinate), predicate="dwithin", distance=degrees)
+        ]
+        found = [(meters, station) for meters, station in found if meters <= reach_m and accept(station)]
+        meters, station = min(found, key=lambda pair: pair[0], default=(0.0, None))
+        return station, meters
+
+    def strict(node_id: int, coordinate: Coordinate) -> tuple[Substation | None, float]:
+        if node_id not in in_substation:
+            in_substation[node_id] = nearest(coordinate, substation_tolerance_m)
+        return in_substation[node_id]
 
     def substation_at(node_id: int, coordinate: Coordinate) -> Substation | None:
-        if node_id not in in_substation:
-            point = Point(coordinate)
-            # ponytail: meters to degrees at the node's latitude; fine away from the poles.
-            degrees = substation_tolerance_m / (111_320 * cos(radians(coordinate[1])))
-            hits = tree.query(point, predicate="dwithin", distance=degrees)
-            nearest = min(hits, key=lambda i: power.substations[i].area.distance(point), default=None)
-            in_substation[node_id] = None if nearest is None else power.substations[nearest]
-        return in_substation[node_id]
+        return strict(node_id, coordinate)[0]
 
     by_voltage: dict[float, list[PowerWay]] = defaultdict(list)
     for way in power.ways:
@@ -158,11 +190,33 @@ def assemble_circuits(power: OsmPower, *, substation_tolerance_m: float = 50.0) 
 
     records = []
     for kv, ways in by_voltage.items():
-        for chain in _chains(ways, substation_at):
-            record = _record(kv, chain, power.supports, substation_at)
+        ways = _fold_phases(ways, substation_at)
+        ends_at = defaultdict(int)
+        for way in ways:
+            ends_at[way.node_ids[0]] += 1
+            ends_at[way.node_ids[-1]] += 1
+
+        def bus_at(node_id: int, coordinate: Coordinate, kv=kv, ends_at=ends_at) -> BusRecord | None:
+            station, meters = strict(node_id, coordinate)
+            if station is None and ends_at[node_id] == 1:
+                station, meters = nearest(
+                    coordinate, dead_end_reach_m,
+                    lambda s: not _voltages_kv(s.tags) or kv in _voltages_kv(s.tags),
+                )
+            if station is None:
+                return None
+            return BusRecord(station.osm_ref, station.tags.get("name"), _inside(station), round(meters))
+
+        for chain, count in _merge_parallel(_slot_chains(ways, kv, substation_at), ways, substation_at):
+            record = _record(kv, chain, power.supports, bus_at, count)
             ends = record.from_bus, record.to_bus
             if not (all(ends) and ends[0].substation_ref == ends[1].substation_ref):  # internal wiring
                 records.append(record)
+    seen: dict[str, int] = defaultdict(int)
+    for index, record in enumerate(records):  # circuits sharing first and last way
+        seen[record.circuit_id] += 1
+        if seen[record.circuit_id] > 1:
+            records[index] = replace(record, circuit_id=f"{record.circuit_id}#{seen[record.circuit_id]}")
     return records
 
 
@@ -240,6 +294,26 @@ def line_from_circuit(
     )
 
 
+def _meters_to(area, coordinate: Coordinate) -> float:
+    """Return the distance from a point to an outline in meters; 0 inside it."""
+    from shapely import Point
+    from shapely.ops import nearest_points
+
+    point = Point(coordinate)
+    if area.contains(point):
+        return 0.0
+    # ponytail: nearest in degrees, not meters; close enough at substation scale.
+    edge = nearest_points(area, point)[0]
+    return _haversine_m(coordinate, (edge.x, edge.y))
+
+
+def _haversine_m(a: Coordinate, b: Coordinate) -> float:
+    (lon1, lat1), (lon2, lat2) = a, b
+    h = sin(radians(lat2 - lat1) / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(
+        radians(lon2 - lon1) / 2) ** 2
+    return 2 * 6_371_000 * asin(sqrt(h))
+
+
 def _inside(station: Substation) -> Coordinate:
     point = station.area.representative_point()  # inside the outline, unlike a centroid
     return point.x, point.y
@@ -266,42 +340,188 @@ def _split(value: str | None) -> list[str]:
     return [part.strip() for part in value.split(";")] if value else []
 
 
-def _chains(ways, substation_at) -> list[list[tuple[PowerWay, bool]]]:
-    """Group ways into chains of (way, reversed) running end to end."""
-    at_node: dict[int, list[int]] = defaultdict(list)
+def _is_phase(tags: dict[str, str]) -> bool:
+    return tags.get("cables") == "1" or any(part.endswith("/3") for part in _split(tags.get("circuits")))
+
+
+def _end_key(way: PowerWay, end: int, substation_at) -> int | str:
+    """Return a way end's node, or its substation: phases often land on separate nodes inside one."""
+    station = substation_at(way.node_ids[end], way.coordinates[end])
+    return station.osm_ref if station else way.node_ids[end]
+
+
+def _fold_phases(ways: list[PowerWay], substation_at) -> list[PowerWay]:
+    """Replace single-phase ways sharing both ends with the middle one, as a whole circuit."""
+    kept, groups = [], defaultdict(list)
+    for way in ways:
+        if _is_phase(way.tags):
+            groups[frozenset((_end_key(way, 0, substation_at), _end_key(way, -1, substation_at)))].append(way)
+        else:
+            kept.append(way)
+    for group in groups.values():
+        if len(group) == 1:
+            kept.extend(group)
+            continue
+        group.sort(key=lambda way: _length_deg(way.coordinates))
+        middle = group[len(group) // 2]
+        circuits = max(1, round(len(group) / 3))  # two of three phases mapped is still one circuit
+        tags = {**middle.tags, "cables": str(3 * circuits), "circuits": str(circuits)}
+        kept.append(PowerWay(middle.osm_id, tags, middle.node_ids, middle.coordinates))
+    return kept
+
+
+def _length_deg(coordinates) -> float:
+    return sum(hypot(x1 - x0, y1 - y0) for (x0, y0), (x1, y1) in zip(coordinates, coordinates[1:]))
+
+
+def _circuit_count(tags: dict[str, str], kv: float) -> int | None:
+    """Return the circuits a way carries at ``kv``, from ``circuits`` or else ``cables`` / 3."""
+    voltages = _voltage_list(tags) or [kv]
+    positions = [i for i, value in enumerate(voltages) if value == kv] or [0]
+    if circuits := sum(_values_at(tags, "circuits", positions, len(voltages), int)):
+        return circuits
+    cables = sum(_values_at(tags, "cables", positions, len(voltages), int))
+    return cables // 3 if cables and cables % 3 == 0 else None
+
+
+def _direction(way: PowerWay, end: int, reach_m: float = 500.0) -> tuple[float, float]:
+    """Return the unit vector from a way's end toward its point ``reach_m`` along, or its far end.
+
+    Looking past the first span keeps a circuit's general heading where ways fan out at a
+    split, as the two circuits of a double-circuit line do around a dead-end tower.
+    """
+    coordinates = way.coordinates if end == 0 else way.coordinates[::-1]
+    x0, y0 = coordinates[0]
+    scale = cos(radians(y0))
+    travelled, (x1, y1) = 0.0, coordinates[-1]
+    for (xa, ya), (xb, yb) in zip(coordinates, coordinates[1:]):
+        travelled += hypot((xb - xa) * scale, yb - ya) * 111_320
+        if travelled >= reach_m:
+            x1, y1 = xb, yb
+            break
+    dx, dy = (x1 - x0) * scale, y1 - y0
+    norm = hypot(dx, dy) or 1.0
+    return dx / norm, dy / norm
+
+
+def _sides(ways, ends, slots) -> tuple[list, list] | None:
+    """Split way ends meeting at a node into the two directions circuits run through it.
+
+    Of the splits whose two sides carry as many circuits, take the one whose sides point
+    most nearly opposite. None when no split balances: a tap.
+    """
+    if len(ends) == 2:
+        return [ends[0]], [ends[1]]
+    directions = [_direction(ways[i], end) for i, end in ends]
+    best, best_score = None, None
+    for mask in range(1, 2 ** (len(ends) - 1)):  # the last end always sits on the second side
+        one = [k for k in range(len(ends)) if mask >> k & 1]
+        other = [k for k in range(len(ends)) if not mask >> k & 1]
+        if sum(slots[ends[k][0]] for k in one) != sum(slots[ends[k][0]] for k in other):
+            continue
+        score = sum(
+            directions[a][0] * directions[b][0] + directions[a][1] * directions[b][1] for a in one for b in other
+        ) / (len(one) * len(other))
+        if best_score is None or score < best_score:
+            best, best_score = ([ends[k] for k in one], [ends[k] for k in other]), score
+    return best
+
+
+def _pair_by_name(left: list, right: list, ways) -> list[tuple]:
+    """Pair circuit slots across a node, same names first, then names containing the other."""
+    def score(x, y) -> int:
+        p, q = ways[x[0]].tags.get("name"), ways[y[0]].tags.get("name")
+        if not p or not q:
+            return 0
+        return 2 if p == q else 1 if p in q or q in p else 0
+
+    pairs, free = [], list(right)
+    for x in left:
+        if not free:
+            break
+        y = max(free, key=lambda y: score(x, y))
+        free.remove(y)
+        pairs.append((x, y))
+    return pairs
+
+
+def _slot_chains(ways: list[PowerWay], kv: float, substation_at) -> list[list[tuple[int, int, bool]]]:
+    """Follow each circuit slot through nodes; chains of (way index, slot, reversed)."""
+    slots = [_circuit_count(way.tags, kv) or 1 for way in ways]
+    at_node: dict[int, list[tuple[int, int]]] = defaultdict(list)
     for index, way in enumerate(ways):
-        at_node[way.node_ids[0]].append(index)
-        at_node[way.node_ids[-1]].append(index)
+        at_node[way.node_ids[0]].append((index, 0))
+        at_node[way.node_ids[-1]].append((index, -1))
+
+    matches: dict[int, dict] = {}
+
+    def match(node: int) -> dict:
+        if node not in matches:
+            ends, result = at_node[node], {}
+            index, end = ends[0]
+            sides = None
+            if len(ends) >= 2 and substation_at(node, ways[index].coordinates[end]) is None:
+                sides = _sides(ways, ends, slots)
+            if sides:
+                left = [(i, e, k) for i, e in sides[0] for k in range(slots[i])]
+                right = [(i, e, k) for i, e in sides[1] for k in range(slots[i])]
+                for x, y in _pair_by_name(left, right, ways):
+                    result[x], result[y] = y, x
+            matches[node] = result
+        return matches[node]
 
     used, chains = set(), []
     for start in range(len(ways)):
-        if start in used:
-            continue
-        used.add(start)
-        chain = [(start, False)]
-        for forward in (True, False):  # grow from the chain's last end, then its first
-            while True:
-                index, flipped = chain[-1] if forward else chain[0]
-                end = -1 if forward != flipped else 0
-                node = ways[index].node_ids[end]
-                touching = at_node[node]
-                if len(touching) != 2 or substation_at(node, ways[index].coordinates[end]) is not None:
-                    break
-                other = touching[0] if touching[1] == index else touching[1]
-                if other in used:  # closed loop, or a way ending on itself
-                    break
-                used.add(other)
-                # Orient the new way so it continues from the shared node.
-                starts_there = ways[other].node_ids[0] == node
-                if forward:
-                    chain.append((other, not starts_there))
-                else:
-                    chain.insert(0, (other, starts_there))
-        chains.append([(ways[i], flipped) for i, flipped in chain])
+        for slot in range(slots[start]):
+            if (start, slot) in used:
+                continue
+            used.add((start, slot))
+            chain = [(start, slot, False)]
+            for forward in (True, False):  # grow from the chain's last end, then its first
+                while True:
+                    index, k, flipped = chain[-1] if forward else chain[0]
+                    end = -1 if forward != flipped else 0
+                    following = match(ways[index].node_ids[end]).get((index, end, k))
+                    if following is None or following[::2] in used:
+                        break
+                    j, j_end, j_slot = following
+                    used.add((j, j_slot))
+                    if forward:  # enter way j at the shared node
+                        chain.append((j, j_slot, j_end != 0))
+                    else:  # way j must finish at the shared node
+                        chain.insert(0, (j, j_slot, j_end == 0))
+            chains.append(chain)
     return chains
 
 
-def _record(kv, chain, supports, substation_at) -> CircuitRecord:
+def _merge_parallel(chains, ways, substation_at) -> list[tuple[list[tuple[PowerWay, bool]], int]]:
+    """Merge circuits with the same ends sharing most of their length; return (chain, circuit count).
+
+    A double-circuit line whose circuits split onto separate ways for a few spans is one
+    corridor: its two circuits share the double-circuit ways for most of their length.
+    """
+    # ponytail: "most" = at least half the shorter circuit's length; tune on real corridors.
+    lengths = [_length_deg(way.coordinates) for way in ways]
+    merged: list[list] = []  # [ends, way indexes, length, chain, count]
+    for chain in chains:
+        first, last = chain[0], chain[-1]
+        ends = frozenset((
+            _end_key(ways[first[0]], -1 if first[2] else 0, substation_at),
+            _end_key(ways[last[0]], 0 if last[2] else -1, substation_at),
+        ))
+        indexes = {i for i, _, _ in chain}
+        length = sum(lengths[i] for i in indexes)
+        for group in merged:
+            shared = sum(lengths[i] for i in group[1] & indexes)
+            if group[0] == ends and shared * 2 >= min(group[2], length):
+                group[4] += 1
+                break
+        else:
+            merged.append([ends, indexes, length, chain, 1])
+    return [([(ways[i], flipped) for i, _, flipped in chain], count) for *_, chain, count in merged]
+
+
+def _record(kv, chain, supports, bus_at, circuits) -> CircuitRecord:
     node_ids: list[int] = []
     route: list[Coordinate] = []
     for way, flipped in chain:
@@ -320,11 +540,7 @@ def _record(kv, chain, supports, substation_at) -> CircuitRecord:
         for index, (node_id, coordinate) in enumerate(zip(node_ids, route))
         if node_id in supports
     )
-    buses = [
-        None if (station := substation_at(node_ids[i], route[i])) is None
-        else BusRecord(station.osm_ref, station.tags.get("name"), _inside(station))
-        for i in (0, -1)
-    ]
+    buses = [bus_at(node_ids[i], route[i]) for i in (0, -1)]
     first_tags = chain[0][0].tags
     tags = {k: v for k, v in first_tags.items() if all(w.tags.get(k) == v for w, _ in chain)}
     voltages = _voltage_list(tags) or [kv]  # joined ways that disagree on voltage keep none
@@ -334,18 +550,17 @@ def _record(kv, chain, supports, substation_at) -> CircuitRecord:
         return _values_at(tags, key, positions, len(voltages), parse)
 
     provenance = {"voltage_kv": "osm:voltage"}
+    # Counted from the ways' circuit tags; a way without them is assumed to carry one.
+    tagged = all(_circuit_count(way.tags, kv) is not None for way, _ in chain)
+    provenance["circuits"] = "osm:circuits" if tagged else "assumed:untagged ways carry one"
     frequency = next(iter(at("frequency", float)), None)
-    circuits = sum(at("circuits", int)) or None
-    if circuits is None and (cables := sum(at("cables", int))) and cables % 3 == 0:
-        circuits, provenance["circuits"] = cables // 3, "osm:cables"
     wires = next(iter(at("wires", WIRES_PER_PHASE.get)), None)
-    for name, value, tag in (("frequency_hz", frequency, "frequency"), ("circuits", circuits, "circuits"),
-                             ("subconductor_count", wires, "wires")):
+    for name, value, tag in (("frequency_hz", frequency, "frequency"), ("subconductor_count", wires, "wires")):
         if value is not None:
-            provenance.setdefault(name, f"osm:{tag}")
+            provenance[name] = f"osm:{tag}"
 
     return CircuitRecord(
-        circuit_id=f"osm:way/{chain[0][0].osm_id}:{kv:g}kV",
+        circuit_id=f"osm:way/{chain[0][0].osm_id}-{chain[-1][0].osm_id}:{kv:g}kV",
         voltage_kv=kv, way_ids=tuple(w.osm_id for w, _ in chain), route=tuple(route), towers=towers,
         from_bus=buses[0], to_bus=buses[1], frequency_hz=frequency, circuits=circuits,
         subconductor_count=wires, tags=tags, provenance=provenance,
@@ -357,7 +572,7 @@ def _values_at(tags, key, positions, count, parse) -> list:
     parts = _split(tags.get(key))
     if len(parts) == count:
         raw = [parts[i] for i in positions]
-    elif len(parts) == 1 and count == 1:
+    elif len(parts) == 1 and len(positions) == count:  # one value for e.g. ``230000;230000``
         raw = parts
     else:
         return []
