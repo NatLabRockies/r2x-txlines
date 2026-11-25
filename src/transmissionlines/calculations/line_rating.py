@@ -8,6 +8,7 @@ direction and its true bearing, and a circuit's rating each hour is the lowest o
 its pieces.
 """
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 
 import numpy as np
@@ -79,14 +80,17 @@ def thermal_rating(
         raise ValueError("weather is empty")
     locations = [list(source) for source in sources]
     grids = [np.array(keys, dtype=float) for keys in locations]
-    index = next(iter(sources[0].values())).index
+    # Every table must share one hourly index; take it from the first and check the rest.
+    first_table = next(iter(sources[0].values()))
+    hours = first_table.index
     for source in sources:
         for location, table in source.items():
-            if not table.index.equals(index):
+            if not table.index.equals(hours):
                 raise ValueError(f"weather at {location} has a different time index")
-    columns = [set(next(iter(source.values())).columns) for source in sources]
-    if shared := set.intersection(*columns) if len(columns) > 1 else set():
-        raise ValueError(f"weather columns {sorted(shared)} come from more than one source")
+    # Each column must come from exactly one source (a source's tables share columns).
+    column_counts = Counter(column for source in sources for column in next(iter(source.values())).columns)
+    if shared := sorted(column for column, count in column_counts.items() if count > 1):
+        raise ValueError(f"weather columns {shared} come from more than one source")
 
     def cells(points: np.ndarray) -> np.ndarray:
         return np.column_stack([_nearest(points, grid) for grid in grids])
@@ -120,16 +124,19 @@ def thermal_rating(
             tables[label] = validate_weather(table)
         return tables[label]
 
-    # Rate pieces in groups sharing weather and hardware, keeping a running minimum
-    # so memory stays one group × hours rather than pieces × hours.
-    groups: dict[tuple[str, tuple[int, ...], object, int], list[int]] = {}
+    # Pieces of one circuit with the same weather cells and the same conductor/bundle
+    # differ only in bearing, so one vectorized ampacity call rates them all. Group by
+    # (circuit_id, weather cell label, conductor uuid, subconductor count); the last two
+    # matter because a circuit's conductor can change from span to span. Keeping a
+    # running minimum across groups holds memory to one group × hours, not pieces × hours.
+    groups: dict[tuple, list[int]] = {}
     for position, (label, by_piece) in enumerate(zip(labels, circuits)):
         for circuit_id, circuit in by_piece.items():
             key = (circuit_id, label, circuit.conductor_spec.uuid, circuit.bundle_spec.subconductor_count)
             groups.setdefault(key, []).append(position)
 
-    amps = {circuit_id: np.full(len(index), np.inf) for circuit_id in circuit_ids}
-    limiting = {circuit_id: np.zeros(len(index), dtype=int) for circuit_id in circuit_ids}
+    amps = {circuit_id: np.full(len(hours), np.inf) for circuit_id in circuit_ids}
+    limiting = {circuit_id: np.zeros(len(hours), dtype=int) for circuit_id in circuit_ids}
     for (circuit_id, label, _, _), positions in groups.items():
         circuit = circuits[positions[0]][circuit_id]
         table = table_for(label)
@@ -141,9 +148,11 @@ def thermal_rating(
             emissivity=emissivity,
             absorptivity=absorptivity,
         )
-        rated = np.broadcast_to(rated, (len(members), len(index)))
+        rated = np.broadcast_to(rated, (len(members), len(hours)))
+        # Ties: argmin takes the earliest piece in the group, and strict < keeps the
+        # group seen first. Arbitrary but deterministic; tied pieces rate the same anyway.
         lowest = rated.argmin(axis=0)
-        candidate = rated[lowest, np.arange(len(index))]
+        candidate = rated[lowest, np.arange(len(hours))]
         better = candidate < amps[circuit_id]
         amps[circuit_id][better] = candidate[better]
         limiting[circuit_id][better] = members[lowest[better]]
@@ -156,8 +165,8 @@ def thermal_rating(
         weather_locations=[
             tuple(tuple(locations[s][i]) for s, i in enumerate(label)) for label in labels
         ],
-        amps=pd.DataFrame(amps, index=index),
-        limiting_piece=pd.DataFrame(limiting, index=index),
+        amps=pd.DataFrame(amps, index=hours),
+        limiting_piece=pd.DataFrame(limiting, index=hours),
     )
 
 

@@ -89,6 +89,8 @@ def test_each_source_is_looked_up_separately() -> None:
     assert result.weather_locations[1] == ((0.05, 0), (0.08, 0))
     with pytest.raises(ValueError, match="more than one source"):
         thermal_rating(_cross_section(), [{(0, 0): _windy()}, {(0, 0): sun}], route=east)
+    with pytest.raises(ValueError, match="more than one source"):  # shared by two of three
+        thermal_rating(_cross_section(), [wind, {(0, 0): sun}, {(0, 0): sun}], route=east)
 
 
 def test_routed_line_uses_its_spans_and_reports_mva() -> None:

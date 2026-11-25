@@ -58,9 +58,13 @@ def _route_pieces(
 ) -> list[Piece]:
     points, keep = _densify(coordinates, max_length_m)
     if cells is not None and len(points) > 2:
+        # Label each short sample stretch by the cells its midpoint falls in. Interior
+        # point i sits between stretches i-1 and i; keep it as a cut if their labels
+        # differ. Route vertices stay kept regardless, and the rest are dropped.
         mid_lon, mid_lat, _, _ = _midpoints(points[:, 0], points[:, 1])
-        labels = np.asarray(cells(np.column_stack([mid_lon, mid_lat])))
-        keep[1:-1] |= (labels[1:] != labels[:-1]).reshape(len(labels) - 1, -1).any(axis=1)
+        stretch_cells = np.asarray(cells(np.column_stack([mid_lon, mid_lat])))
+        cell_changes = (stretch_cells[1:] != stretch_cells[:-1]).any(axis=1)
+        keep[1:-1] |= cell_changes
         points = points[keep]
     lon, lat = points.T
     mid_lon, mid_lat, length, bearing = _midpoints(lon, lat)

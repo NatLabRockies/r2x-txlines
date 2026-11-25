@@ -24,14 +24,16 @@ from transmissionlines.calculations.thermal import C_TO_K
 
 WTK_PATH = "/nrel/wtk/conus/wtk_conus_{year}.h5"
 NSRDB_PATH = "/nrel/nsrdb/GOES/aggregated/v4.0.0/nsrdb_{year}.h5"
-# Weather column: (WTK dataset, scale, offset). WTK stores integers × 100 and its files
-# carry no scale attributes: °C, m/s, degrees from true north, kPa and percent.
+# Weather column: (WTK dataset, scale, offset), so value = stored * scale + offset.
+# WTK stores each value as an integer, 100 × its natural unit, and its files carry no
+# scale_factor attributes to undo that, so the scale here does it and also converts
+# to the units validate_weather expects.
 _WTK = {
-    "air_temperature_k": ("temperature_10m", 0.01, C_TO_K),
-    "wind_speed_m_s": ("windspeed_10m", 0.01, 0.0),
-    "wind_direction_deg": ("winddirection_10m", 0.01, 0.0),
-    "pressure_pa": ("pressure_0m", 10.0, 0.0),
-    "relative_humidity": ("relativehumidity_2m", 1e-4, 0.0),
+    "air_temperature_k": ("temperature_10m", 0.01, C_TO_K),  # 100 × °C -> K
+    "wind_speed_m_s": ("windspeed_10m", 0.01, 0.0),  # 100 × m/s
+    "wind_direction_deg": ("winddirection_10m", 0.01, 0.0),  # 100 × degrees from true north
+    "pressure_pa": ("pressure_0m", 10.0, 0.0),  # 100 × kPa -> Pa (× 0.01 × 1000)
+    "relative_humidity": ("relativehumidity_2m", 1e-4, 0.0),  # 100 × percent -> fraction
 }
 _EARTH_RADIUS_KM = 6371.0
 # Grid spacing is 2 km (WTK) and 4 km (NSRDB); anything farther is off the grid.
@@ -175,6 +177,7 @@ def fetch_weather(
     for year in years:
         wind = _cells("wtk", wtk_path, [dataset for dataset, _, _ in _WTK.values()], wtk_cells, year, cache)
         sun = _cells("nsrdb", nsrdb_path, ["ghi"], sun_cells, year, cache)
+        # All WTK cells in a year share one hourly index; take it from any one cell.
         hours = next(iter(wind.values())).index
         for cell, raw in wind.items():
             table = pd.DataFrame(
