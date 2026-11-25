@@ -103,8 +103,8 @@ def thermal_rating(
         circuits = [by_id] * len(route_pieces)
     if not route_pieces:
         raise ValueError("route has no length")
-    circuit_ids = list(circuits[0])
-    if any(list(by_piece) != circuit_ids for by_piece in circuits):
+    circuit_ids = list(circuits[0])  # first span's order sets the output columns
+    if any(set(by_piece) != set(circuit_ids) for by_piece in circuits):
         raise ValueError("every span must carry the same circuits")
 
     labels = [tuple(int(i) for i in row) for row in cells(np.array([piece.midpoint for piece in route_pieces]))]

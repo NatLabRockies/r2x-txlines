@@ -105,5 +105,8 @@ def test_route_and_weather_are_checked() -> None:
         thermal_rating(_cross_section(), {(0, 0): _windy()})
     with pytest.raises(ValueError, match="wind_direction_deg"):
         thermal_rating(_cross_section(_ELBOW), {(0, 0): _weather()})
+    for bad in (80.0, float("nan")):
+        with pytest.raises(ValueError, match="fractions between 0 and 1"):
+            thermal_rating(_cross_section(_ELBOW), {(0, 0): _windy()}, emissivity=bad)
     with pytest.raises(ValueError, match="different time index"):
         thermal_rating(_cross_section(_ELBOW), {(0, 0): _windy(3), (1, 1): _windy(4)})

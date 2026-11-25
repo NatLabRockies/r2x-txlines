@@ -93,6 +93,10 @@ def ampacity(
     temperature (air hotter than the conductor, or sun alone heating it past
     that) rate as zero.
     """
+    for fraction in (emissivity, absorptivity):
+        # Also rejects NaN, which would otherwise pass through as a NaN rating.
+        if not np.all((np.asarray(fraction, float) >= 0) & (np.asarray(fraction, float) <= 1)):
+            raise ValueError("emissivity and absorptivity must be fractions between 0 and 1")
     d, r = np.asarray(diameter_m, float), np.asarray(resistance_ohm_m, float)
     t_c, t_a = np.asarray(conductor_temperature_k, float), np.asarray(air_temperature_k, float)
     angle = np.asarray(wind_angle_deg, float)
@@ -177,8 +181,6 @@ def conductor_ampacity(
     Emissivity and absorptivity default to DynamicLineRatings' 0.8. Without a
     ``relative_humidity`` column, humidity is 0.5.
     """
-    if not (0 <= emissivity <= 1 and 0 <= absorptivity <= 1):
-        raise ValueError("emissivity and absorptivity must be fractions between 0 and 1")
     weather = validate_weather(weather)
     amps = ampacity(
         **conductor_inputs(conductor, conductor_temperature_c),
