@@ -9,7 +9,7 @@ from r2x_core import HasUnits
 
 from transmissionlines.models.common import Bus
 from transmissionlines.models.configurations import TowerConfiguration
-from transmissionlines.models.routing import LineSpan
+from transmissionlines.models.routing import LineSpan, RouteGeometry
 from transmissionlines.units import Hertz, Kilovolts, OhmMeters
 
 
@@ -46,9 +46,14 @@ class AbstractTransmissionLine(HasUnits, Component, ABC):
 
 
 class CrossSectionTransmissionLine(AbstractTransmissionLine):
-    """Select a representative configuration without physical supports."""
+    """Select a representative configuration without physical supports.
+
+    ``route`` is the line's path with no towers (e.g. from HIFLD), needed only for
+    calculations that depend on where the line runs, such as thermal rating.
+    """
 
     configuration: TowerConfiguration
+    route: RouteGeometry | None = None
 
     def _line_variant(self) -> str:
         return "cross-section"

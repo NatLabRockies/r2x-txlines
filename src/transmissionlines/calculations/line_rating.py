@@ -18,7 +18,7 @@ from transmissionlines.calculations.pieces import WGS84, pieces
 from transmissionlines.calculations.thermal import ampacity, conductor_inputs, validate_weather, weather_inputs
 from transmissionlines.models.assets import CrossSectionTransmissionLine, RoutedTransmissionLine
 from transmissionlines.models.configurations import CircuitConfiguration
-from transmissionlines.models.routing import LineSpan, RouteGeometry
+from transmissionlines.models.routing import LineSpan
 from transmissionlines.models.thermal import ThermalRatingResult
 
 WIND_DIRECTION_COLUMN = "wind_direction_deg"
@@ -52,7 +52,6 @@ def thermal_rating(
     line: RoutedTransmissionLine | CrossSectionTransmissionLine,
     weather: WeatherSource | Sequence[WeatherSource],
     *,
-    route: RouteGeometry | None = None,
     conductor_temperature_c: float = 75.0,
     emissivity: float = 0.8,
     absorptivity: float = 0.8,
@@ -62,7 +61,7 @@ def thermal_rating(
     Parameters
     ----------
     line : RoutedTransmissionLine or CrossSectionTransmissionLine
-        A line with spans, or a representative cross-section plus ``route``.
+        A line with spans, or a representative cross-section with a ``route``.
     weather : mapping, or sequence of mappings, of (longitude, latitude) to DataFrame
         Weather tables sharing one UTC index. Together, the sources give the columns
         :func:`~transmissionlines.calculations.thermal.validate_weather` checks and
@@ -70,8 +69,6 @@ def thermal_rating(
         each column from exactly one source. Each source should have a location in
         every cell the route crosses, e.g. by fetching at
         :func:`~transmissionlines.calculations.pieces.weather_points`.
-    route : RouteGeometry, optional
-        The route of a cross-section line, e.g. from HIFLD. Not allowed with spans.
     conductor_temperature_c, emissivity, absorptivity : float
         As in :func:`~transmissionlines.calculations.thermal.conductor_ampacity`.
     """
@@ -96,14 +93,12 @@ def thermal_rating(
         return np.column_stack([_nearest(points, grid) for grid in grids])
 
     if isinstance(line, RoutedTransmissionLine):
-        if route is not None:
-            raise ValueError("a routed line takes its route from its spans")
         route_pieces = pieces(line, cells=cells)
         circuits = [_span_circuits(piece.span) for piece in route_pieces if piece.span is not None]
     else:
-        if route is None:
+        if line.route is None:
             raise ValueError("a cross-section line needs a route")
-        route_pieces = pieces(route, cells=cells)
+        route_pieces = pieces(line.route, cells=cells)
         by_id = {circuit.circuit_id: circuit for circuit in line.configuration.circuits}
         circuits = [by_id] * len(route_pieces)
     if not route_pieces:

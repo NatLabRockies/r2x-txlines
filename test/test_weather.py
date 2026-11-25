@@ -86,7 +86,7 @@ def test_points_off_the_grid_are_rejected(tmp_path: Path) -> None:
 def test_route_goes_to_a_rating_with_no_manual_steps(tmp_path: Path) -> None:
     route = RouteGeometry(coordinates=[(-104.99, 40.01), (-104.91, 40.01), (-104.91, 40.15)])
     wind, sun = _fetch(tmp_path, weather_points(route))
-    result = thermal_rating(_cross_section(), (wind, sun), route=route)
+    result = thermal_rating(_cross_section(route), (wind, sun))
     used = {locations for locations in result.weather_locations}
     assert {w for w, _ in used} == set(wind) and {s for _, s in used} == set(sun)
     assert len(result.pieces) == len(used) + 1  # one piece per cell pair, plus the bend

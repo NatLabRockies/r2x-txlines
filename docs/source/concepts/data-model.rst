@@ -14,6 +14,7 @@ the input graph and serialized system contain no calculated matrices or curves.
      AbstractTransmissionLine <|-- CrossSectionTransmissionLine
      AbstractTransmissionLine <|-- RoutedTransmissionLine
      CrossSectionTransmissionLine --> TowerConfiguration : representative
+     CrossSectionTransmissionLine --> RouteGeometry : optional route
      RoutedTransmissionLine --> Bus : terminals
      RoutedTransmissionLine --> LineSpan : ordered
      LineSpan --> StartEnd : references
@@ -27,7 +28,8 @@ the input graph and serialized system contain no calculated matrices or curves.
 
 ``AbstractTransmissionLine`` owns positive nominal voltage, frequency, and
 earth resistivity. A ``CrossSectionTransmissionLine`` requires one registered
-representative ``TowerConfiguration``; it has no physical tower, bus, or route.
+representative ``TowerConfiguration``; it has no physical tower or bus, and
+only an optional ``RouteGeometry`` (e.g. from HIFLD) for thermal rating.
 A ``RoutedTransmissionLine`` requires distinct terminal buses and nonempty
 ordered spans. Each ``LineSpan`` references a ``StartEnd`` component containing
 real, distinct ``ElectricalTower`` endpoints. Each tower selects its own
